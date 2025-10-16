@@ -103,29 +103,22 @@ func (s *Service) UpsertUser(ctx context.Context, input UserUpsertInput) error {
 	}
 
 	expiresAt := input.SubscribeTime.UntilOr(s.clock.Now())
-	outboxPayload := struct {
-		UserID     string    `json:"user_id"`
-		DriverType string    `json:"driver"`
-		ExpiresAt  time.Time `json:"expires_at"`
-	}{
-		UserID:     input.UserID,
-		DriverType: input.DriverType,
-		ExpiresAt:  expiresAt.UTC().Truncate(time.Second),
-	}
-	payload, _ := json.Marshal(outboxPayload)
+	up := &UpsertPayload{UserID: input.UserID, DriverType: input.DriverType, ExpiresAt: expiresAt}
+	payload, _ := json.Marshal(up)
 
+	var seq uint64
 	err = s.tx.WithTx(ctx, func(ctx context.Context) error {
-		seq, err := s.store.NextSeq(ctx, agentID)
+		seq, err = s.store.NextSeq(ctx, agentID)
 		if err != nil {
 			return err
 		}
 
 		err = s.store.EnqueueTask(ctx, OutboxTask{
-			AgentID:       agentID,
-			Seq:           seq,
-			RequestID:     input.RequestID,
-			OperationKind: taskUpsertUser,
-			Payload:       payload,
+			AgentID:   agentID,
+			Seq:       seq,
+			RequestID: input.RequestID,
+			Kind:      OpUpsert,
+			Payload:   payload,
 		})
 		if err != nil {
 			return err
@@ -133,17 +126,16 @@ func (s *Service) UpsertUser(ctx context.Context, input UserUpsertInput) error {
 
 		return nil
 	})
-
 	if err != nil {
 		return fmt.Errorf("fail upsert user storage: %w", err)
 	}
 
-	s.trySendNow(agentID, Task{
+	s.trySendNow(Operation{
 		AgentID:   agentID,
-		RequestID: input.RequestID,
 		Seq:       seq,
-		Kind:      TaskUpsert,
-		Payload:   payload,
+		RequestID: input.RequestID,
+		Kind:      OpUpsert,
+		Upsert:    up,
 	})
 
 	return nil
@@ -160,54 +152,49 @@ func (s *Service) RemoveUser(ctx context.Context, input RemoveUserInput) error {
 		return fmt.Errorf("fail remove user storage: %w", err)
 	}
 
-	outboxPayload := struct {
-		UserID     string `json:"user_id"`
-		DriverType string `json:"driver"`
-	}{
-		UserID:     input.UserID,
-		DriverType: input.DriverType,
-	}
-	payload, _ := json.Marshal(outboxPayload)
+	rm := &RemovePayload{UserID: input.UserID, DriverType: input.DriverType}
+	payload, _ := json.Marshal(rm)
 
+	var seq uint64
 	err = s.tx.WithTx(ctx, func(ctx context.Context) error {
-		seq, err := s.store.NextSeq(ctx, agentID)
+		seq, err = s.store.NextSeq(ctx, agentID)
 		if err != nil {
 			return err
 		}
 
 		err = s.store.EnqueueTask(ctx, OutboxTask{
-			AgentID:       agentID,
-			Seq:           seq,
-			RequestID:     input.RequestID,
-			OperationKind: taskRemoveUser,
-			Payload:       payload,
+			AgentID:   agentID,
+			Seq:       seq,
+			RequestID: input.RequestID,
+			Kind:      OpRemove,
+			Payload:   payload,
 		})
 		if err != nil {
 			return err
 		}
 		return nil
 	})
-
 	if err != nil {
 		return fmt.Errorf("fail remove user storage: %w", err)
 	}
 
-	s.trySendNow(agentID, OutboxTask{})
+	s.trySendNow(Operation{
+		AgentID:   agentID,
+		RequestID: input.RequestID,
+		Seq:       seq,
+		Kind:      OpRemove,
+		Remove:    rm,
+	})
 
 	return nil
 }
 
-func (s *Service) trySendNow(agentID string, t OutboxTask) {
+func (s *Service) trySendNow(op Operation) {
 	if s.reg == nil {
 		return
 	}
 
-	err := s.reg.sendByAgentID(agentID)
-	if err != nil {
-		return
-	}
-	wire := buildEnvelope(t) // конвертация OutboxTask -> внутренний "конверт" транспорта
-	if trySend(sess, wire) { // твоя логика отправки в sendCh/стрим
-		_ = s.store.MarkTaskSent(context.Background(), agentID, t.Seq)
+	if s.reg.trySend(op) {
+		_ = s.store.MarkTaskSent(context.Background(), op.AgentID, op.Seq)
 	}
 }

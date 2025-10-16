@@ -66,10 +66,10 @@ func (m *Manager) Workstream(stream controlpb.ControlPlane_WorkstreamServer) err
 		agentID:     agent.ID,
 		region:      agent.Region,
 		driverTypes: toSet(agent.DriverTypes),
-		sendCh:      make(chan *controlpb.ControlToAgent, 1024),
+		sendCh:      make(chan Operation, 1024),
 		cancel:      cancel,
 	}
-	if old := m.reg.addOrSwap(s); old != nil {
+	if old := m.reg.addAgentOrSwap(s); old != nil {
 		old.cancel()
 		close(old.sendCh)
 	}
@@ -179,8 +179,8 @@ func sender(ctx context.Context, stream controlpb.ControlPlane_WorkstreamServer,
 			if !ok {
 				return nil
 			}
-			out
-			if err := stream.Send(out.ToProto()); err != nil {
+			out := task.ToProto()
+			if err := stream.Send(&controlpb.ControlToAgent{Msg: out}); err != nil {
 				return err
 			}
 		}

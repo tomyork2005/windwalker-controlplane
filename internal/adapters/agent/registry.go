@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"sync/atomic"
 )
@@ -12,7 +11,7 @@ type session struct {
 	region      string
 	driverTypes map[string]struct{}
 
-	sendCh     chan *Task
+	sendCh     chan Operation
 	lastAck    atomic.Uint64
 	recovering atomic.Bool
 	cancel     context.CancelFunc
@@ -29,7 +28,7 @@ func newRegistry() *registry {
 	}
 }
 
-func (r *registry) addOrSwap(s *session) (old *session) {
+func (r *registry) addAgentOrSwap(s *session) (old *session) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -51,20 +50,17 @@ func (r *registry) get(agentID string) (*session, bool) {
 	return s, ok
 }
 
-func (r *registry) sendByAgentID(task Task) error {
-	err := task.Validate()
-	if err != nil {
-		return errors.New("invalid task")
-	}
-
-	s, ok := r.get(task.AgentID)
+func (r *registry) trySend(op Operation) bool {
+	s, ok := r.get(op.AgentID)
 	if !ok {
-		return errors.New("agent not found")
+		return false
 	}
-
-	s.sendCh <- &task
-
-	return nil
+	select {
+	case s.sendCh <- op:
+		return true
+	default:
+		return false
+	}
 }
 
 func toSet(ss []string) map[string]struct{} {

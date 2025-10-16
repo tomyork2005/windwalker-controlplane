@@ -86,34 +86,50 @@ func (i *RemoveUserInput) Validate() error {
 	return nil
 }
 
-type Task struct {
+type OperationKind string
+
+const (
+	OpUpsert    OperationKind = "upsert"
+	OpRemove    OperationKind = "remove"
+	OpStatsAll  OperationKind = "stats_all"
+	OpStatsUser OperationKind = "stats_user"
+)
+
+type Operation struct {
 	AgentID   string
 	RequestID string
 	Seq       uint64
-	Type      string
+	Kind      OperationKind
 
-	UserID        string
-	DriverType    string
-	Region        string
-	SubscribeTime time.Time
+	Upsert    *UpsertPayload
+	Remove    *RemovePayload
+	StatsUser *StatsUserPayload
 }
 
-func (t *Task) Validate() error {
-	if t.AgentID == "" {
+type UpsertPayload struct {
+	UserID     string    `json:"user_id"`
+	DriverType string    `json:"driver"`
+	ExpiresAt  time.Time `json:"expires_at"`
+}
+type RemovePayload struct {
+	UserID     string `json:"user_id"`
+	DriverType string `json:"driver"`
+}
+type StatsUserPayload struct {
+	UserID string `json:"user_id"`
+}
+
+func (o *Operation) Validate() error {
+	if o.AgentID == "" {
 		return fmt.Errorf("agent_id is required")
 	}
-	if t.RequestID == "" {
+	if o.RequestID == "" {
 		return fmt.Errorf("request_id is required")
 	}
-	if t.Seq == 0 {
+	if o.Seq == 0 {
 		return fmt.Errorf("seq is required")
 	}
-	if t.Type != taskUpsertUser && t.Type != taskRemoveUser {
-		return fmt.Errorf("operation type is invalid")
-	}
-	if t.UserID == "" {
-		return fmt.Errorf("user_id is required")
-	}
+
 	return nil
 }
 
@@ -158,9 +174,9 @@ func (t *Task) ToProto() *controlpb.ControlToAgent_Task {
 }
 
 type OutboxTask struct {
-	AgentID       string
-	Seq           uint64
-	RequestID     string
-	OperationKind string
-	Payload       []byte
+	AgentID   string
+	Seq       uint64
+	RequestID string
+	Kind      OperationKind
+	Payload   []byte
 }
