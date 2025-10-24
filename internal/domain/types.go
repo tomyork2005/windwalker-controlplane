@@ -1,68 +1,102 @@
 package domain
 
-import "time"
+import (
+	"errors"
+	"time"
+)
+
+type Currency string
+
+type Money struct {
+	Amount int64
+	Curr   Currency
+}
+
+const (
+	RUBCurrency Currency = "RUB"
+	USDCurrency Currency = "USD"
+)
+
+var supportedCurrencies = map[Currency]struct{}{
+	RUBCurrency: {},
+	USDCurrency: {},
+}
+
+var (
+	ErrNegativeAmount  = errors.New("amount must be non-negative")
+	ErrInvalidCurrency = errors.New("invalid currency")
+)
+
+type InvoiceStatus string
+
+const (
+	NewInvoiceStatus            InvoiceStatus = "new"
+	PendingInvoiceStatus        InvoiceStatus = "pending"
+	StatusCanceledInvoiceStatus InvoiceStatus = "canceled"
+	SuccessInvoiceStatus        InvoiceStatus = "success"
+)
 
 type User struct {
-	ID        string    `db:"id"`
-	TgUserID  string    `db:"tg_user_id"`
-	CreatedAt time.Time `db:"created_at"`
+	ID       string
+	Username string
 }
 type Plan struct {
-	ID       string `db:"id"`
-	Name     string `db:"name"`
-	Duration string `db:"duration"`
-	Region   string `db:"region"`
-	Protocol string `db:"protocol"`
-	Price    int64  `db:"price"`
-}
-
-type Invoice struct {
-	ID          string     `db:"id"`
-	UserID      string     `db:"user_id"`
-	PlanID      string     `db:"plan_id"`
-	Provider    string     `db:"provider"`
-	Amount      int64      `db:"amount_cents"`
-	Status      string     `db:"status"`
-	ProviderRef *string    `db:"provider_ref"` // payment provider id
-	CheckoutURL *string    `db:"checkout_url"`
-	ExpiresAt   *time.Time `db:"expires_at"`
-	CreatedAt   time.Time  `db:"created_at"`
-	PaidAt      *time.Time `db:"paid_at"`
-}
-
-type Agent struct {
-	ID         string `db:"id"`
-	Region     string `db:"region"`
-	Status     string `db:"status"`
-	UsersCount int64  `db:"users_count"`
+	ID       string
+	Name     string
+	Region   string
+	Protocol string
+	Money    Money
+	Archived bool
 }
 
 type Subscription struct {
-	ID        string    `db:"id"`
-	UserID    string    `db:"user_id"`
-	PlanID    string    `db:"plan_id"`
-	Status    string    `db:"status"`
-	StartAt   time.Time `db:"start_at"`
-	EndAt     time.Time `db:"end_at"`
-	CreatedAt time.Time `db:"created_at"`
-	UpdatedAt time.Time `db:"updated_at"`
+	ID         string
+	UserID     string
+	PlanID     string
+	Status     string
+	StartAt    time.Time
+	EndAt      time.Time
+	CanceledAt time.Time
+}
+
+type Invoice struct {
+	ID              string
+	UserID          string
+	PlanID          string
+	PaymentProvider string
+	Money           Money
+	Status          InvoiceStatus
+	CheckoutURL     string
+	ExpiresAt       time.Time
+	PaidAt          time.Time
+}
+
+type Agent struct {
+	ID     string
+	Region string
+	Status string
 }
 
 type AccessLink struct {
-	ID        string    `db:"id"`
-	UserID    string    `db:"user_id"`
-	AgentID   string    `db:"agent_id"`
-	Protocol  string    `db:"protocol"`
-	Link      string    `db:"link"`
-	ExpiresAt time.Time `db:"expires_at"`
-	Revoked   bool      `db:"revoked"`
-	CreatedAt time.Time `db:"created_at"`
-	UpdatedAt time.Time `db:"updated_at"`
-	RequestID string    `db:"request_id"`
+	ID             string
+	UserID         string
+	AgentID        string
+	SubscriptionID string
+	RequestID      string
+	Protocol       string
+	Link           string
+	ExpiresAt      time.Time
 }
 
-type ReferralRelation struct {
-	InvitedUserID string    `db:"invited_user_id"`
-	InviterUserID string    `db:"inviter_user_id"`
-	CreatedAt     time.Time `db:"created_at"`
+func NewMoney(amount int64, currency string) (Money, error) {
+	if amount < 0 {
+		return Money{}, ErrNegativeAmount
+	}
+
+	_, ok := supportedCurrencies[Currency(currency)]
+	if !ok {
+		return Money{}, ErrInvalidCurrency
+	}
+
+	return Money{Amount: amount, Curr: Currency(currency)}, nil
 }

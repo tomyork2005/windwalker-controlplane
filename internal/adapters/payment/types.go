@@ -1,25 +1,13 @@
 package payment
 
-import "errors"
-
-var (
-	ErrIPNotAllowed = errors.New("IP not allowed ")
-	ErrBadSignature = errors.New("Bad signature ")
-)
-
-type Currency string
-
-const (
-	RUB Currency = "RUB"
-	USD Currency = "USD"
-	EUR Currency = "EUR"
+import (
+	"control-plane/internal/domain"
+	"errors"
 )
 
 type StartPaymentInput struct {
 	InvoiceID string
-	Amount    string
-	Currency  Currency
-	Email     string
+	Money     domain.Money
 	MethodID  string
 	IP        string
 }
@@ -27,15 +15,6 @@ type StartPaymentInput struct {
 func (i *StartPaymentInput) Validate() error {
 	if i.InvoiceID == "" {
 		return errors.New("validation error - missing InvoiceID")
-	}
-	if i.Amount == "" {
-		return errors.New("validation error - missing Amount")
-	}
-	if i.Currency == "" {
-		return errors.New("validation error - missing Currency")
-	}
-	if i.Email == "" {
-		return errors.New("validation error - missing Email")
 	}
 	if i.MethodID == "" {
 		return errors.New("validation error - missing MethodID")

@@ -8,4 +8,6 @@ type Config struct {
 	BaseAPI        string
 	IPWhitelist    []string
 	ConfirmWithYES bool
+
+	DefaultEmail string
 }

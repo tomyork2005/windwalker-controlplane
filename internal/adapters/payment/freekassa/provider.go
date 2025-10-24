@@ -38,29 +38,49 @@ func NewProvider(cfg *Config, httpC *http.Client, nonce payment.Noncer) *Provide
 }
 
 func (p *Provider) StartPayment(ctx context.Context, in payment.StartPaymentInput) (payment.StartPaymentOutput, error) {
-	nonce := p.nonce.Next()
-
 	err := in.Validate()
 	if err != nil {
 		return payment.StartPaymentOutput{}, err
 	}
 
-	params := map[string]string{
-		"shopId":    fmt.Sprintf("%d", p.cfg.ShopID),
-		"nonce":     nonce,
-		"paymentId": in.InvoiceID,
-		"i":         in.MethodID,
-		"email":     in.Email,
-		"ip":        in.IP,
-		"amount":    in.Amount,
-		"currency":  string(in.Currency),
-	}
+	// Check method id is available
 
+	nonce := p.nonce.Next()
+	params := map[string]string{
+		"shopId": fmt.Sprintf("%d", p.cfg.ShopID),
+		"nonce":  nonce,
+	}
 	signature := sign(params, p.cfg.APIKey)
 	params["signature"] = signature
 
 	body, _ := json.Marshal(params)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.cfg.BaseAPI+"/orders/create", bytes.NewBuffer(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s%s%s%s", p.cfg.BaseAPI, "/currencies/", in.MethodID, "/status"), bytes.NewBuffer(body))
+	if err != nil {
+		return payment.StartPaymentOutput{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	// TODO parse success
+
+	// Create order
+
+	nonce = p.nonce.Next()
+	params = map[string]string{
+		"shopId":    fmt.Sprintf("%d", p.cfg.ShopID),
+		"nonce":     nonce,
+		"paymentId": in.InvoiceID,
+		"i":         in.MethodID,
+		"email":     p.cfg.DefaultEmail,
+		"ip":        in.IP,
+		"amount":    fmt.Sprintf("%d", in.Money.Amount),
+		"currency":  string(in.Money.Curr),
+	}
+
+	signature = sign(params, p.cfg.APIKey)
+	params["signature"] = signature
+
+	body, _ = json.Marshal(params)
+	req, err = http.NewRequestWithContext(ctx, http.MethodPost, p.cfg.BaseAPI+"/orders/create", bytes.NewBuffer(body))
 	if err != nil {
 		return payment.StartPaymentOutput{}, err
 	}
