@@ -22,12 +22,12 @@ import (
 type Provider struct {
 	cfg   *Config
 	httpC *http.Client
-	nonce payment.Noncer
+	nonce Noncer
 }
 
 var _ core.PaymentProvider = (*Provider)(nil)
 
-func NewProvider(cfg *Config, httpC *http.Client, nonce payment.Noncer) *Provider {
+func NewProvider(cfg *Config, httpC *http.Client, nonce Noncer) *Provider {
 	if cfg.BaseAPI == "" {
 		cfg.BaseAPI = "https://api.fk.life/v1"
 	}
@@ -37,10 +37,10 @@ func NewProvider(cfg *Config, httpC *http.Client, nonce payment.Noncer) *Provide
 	return &Provider{cfg: cfg, httpC: httpC, nonce: nonce}
 }
 
-func (p *Provider) StartPayment(ctx context.Context, in payment.StartPaymentInput) (payment.StartPaymentOutput, error) {
+func (p *Provider) CreatePaymentOrder(ctx context.Context, in payment.CreateOrderInput) (payment.CreateOrderOutput, error) {
 	err := in.Validate()
 	if err != nil {
-		return payment.StartPaymentOutput{}, err
+		return payment.CreateOrderOutput{}, err
 	}
 
 	// Check method id is available
@@ -56,7 +56,7 @@ func (p *Provider) StartPayment(ctx context.Context, in payment.StartPaymentInpu
 	body, _ := json.Marshal(params)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s%s%s%s", p.cfg.BaseAPI, "/currencies/", in.MethodID, "/status"), bytes.NewBuffer(body))
 	if err != nil {
-		return payment.StartPaymentOutput{}, err
+		return payment.CreateOrderOutput{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
@@ -82,31 +82,31 @@ func (p *Provider) StartPayment(ctx context.Context, in payment.StartPaymentInpu
 	body, _ = json.Marshal(params)
 	req, err = http.NewRequestWithContext(ctx, http.MethodPost, p.cfg.BaseAPI+"/orders/create", bytes.NewBuffer(body))
 	if err != nil {
-		return payment.StartPaymentOutput{}, err
+		return payment.CreateOrderOutput{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := p.httpC.Do(req)
 	if err != nil {
-		return payment.StartPaymentOutput{}, err
+		return payment.CreateOrderOutput{}, err
 	}
 	defer resp.Body.Close()
 
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 300 {
-		return payment.StartPaymentOutput{Raw: raw}, fmt.Errorf("fk create order: status=%d body=%s", resp.StatusCode, string(raw))
+		return payment.CreateOrderOutput{Raw: raw}, fmt.Errorf("fk create order: status=%d body=%s", resp.StatusCode, string(raw))
 	}
 
 	var out createOrderResponse
 	err = json.Unmarshal(raw, &out)
 	if err != nil {
-		return payment.StartPaymentOutput{Raw: raw}, fmt.Errorf("fk create order, cant unmarshal: err=%w", err)
+		return payment.CreateOrderOutput{Raw: raw}, fmt.Errorf("fk create order, cant unmarshal: err=%w", err)
 	}
 	if out.Location == "" {
-		return payment.StartPaymentOutput{Raw: raw}, fmt.Errorf("fk create order: empty location")
+		return payment.CreateOrderOutput{Raw: raw}, fmt.Errorf("fk create order: empty location")
 	}
 
-	return payment.StartPaymentOutput{
+	return payment.CreateOrderOutput{
 		RedirectURL:     out.Location,
 		ProviderOrderID: out.OrderID,
 		Raw:             raw,

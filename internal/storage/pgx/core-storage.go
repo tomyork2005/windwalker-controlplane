@@ -2,10 +2,12 @@ package pgx
 
 import (
 	"context"
+	"errors"
+
 	"control-plane/internal/domain"
 	"control-plane/internal/storage"
 	"control-plane/internal/storage/dao"
-	"errors"
+
 	"github.com/jackc/pgx/v5"
 )
 
@@ -61,8 +63,24 @@ func (s *Storage) GetPlanByID(ctx context.Context, planID string) (*domain.Plan,
 	return &domainPlan, nil
 }
 
-func (s *Storage) CreateInvoice(ctx context.Context, invoice domain.Invoice) (*domain.Invoice, error) {
+func (s *Storage) CreateInvoice(ctx context.Context, invoice domain.Invoice) error {
 	const query = `
-	INSERT INTO invoices (id, amount, currency, date_created, date_updated)
-	values ()`
+	INSERT INTO invoices (id, user_id, plan_id, payment_provider, amount, currency, status, checkout_url, expires_at)
+	values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
+
+	_, err := s.getExecutor(ctx).Exec(ctx, query,
+		invoice.ID,
+		invoice.UserID,
+		invoice.PlanID,
+		invoice.PaymentProvider,
+		invoice.Money.Amount,
+		invoice.Money.Curr,
+		invoice.Status,
+		invoice.CheckoutURL,
+		invoice.ExpiresAt.Unix())
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

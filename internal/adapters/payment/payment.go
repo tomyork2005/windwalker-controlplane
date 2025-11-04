@@ -3,35 +3,64 @@ package payment
 import (
 	"context"
 	"errors"
-	"net/http"
+	"fmt"
+
+	"control-plane/internal/domain"
 )
 
 var (
-	ErrIPNotAllowed     = errors.New("IP not allowed ")
-	ErrBadSignature     = errors.New("Bad signature ")
-	ErrProviderNotFound = errors.New("provider who`s supported this method not found")
+	ErrBadCreateOrderInput = errors.New("bad input")
+	ErrBadSignature        = errors.New("bad token signature")
+	ErrProviderNotFound    = errors.New("payment provider for method not found")
 )
 
-type Payments struct {
-	providers map[string]provider
-}
-
-type provider interface {
+type Provider interface {
 	Name() string
-	StartPayment(ctx context.Context, input StartPaymentInput) (StartPaymentOutput, error)
-	VerifyCallback(r *http.Request) (Callback, error)
+	Methods() []string
+	CreatePaymentOrder(ctx context.Context, input domain.CreateOrderInput) (domain.CreateOrderOutput, error)
+	VerifyCallback(input domain.CallbackInput) (domain.CallbackOutput, error)
 }
 
-func (p *Payments) StartPayment(ctx context.Context, input StartPaymentInput) (StartPaymentOutput, error) {
-	pr, ok := p.providers[input.MethodID]
-	if !ok {
-		return StartPaymentOutput{}, ErrProviderNotFound
+type Payments struct {
+	providersMap        map[string]Provider
+	methodToProviderMap map[string]Provider
+}
+
+func NewPayments(providers ...Provider) *Payments {
+	providersMap := make(map[string]Provider, len(providers))
+	methodToProviderMap := make(map[string]Provider, len(providers))
+
+	for _, pr := range providers {
+		providersMap[pr.Name()] = pr
+		for _, m := range pr.Methods() {
+			methodToProviderMap[m] = pr // okay if the same method, we choose last
+		}
 	}
 
-	return pr.StartPayment(ctx, input)
+	return &Payments{providersMap, methodToProviderMap}
 }
 
-func (p *Payments) VerifyCallback(r *http.Request) (Callback, error) {
-	// TODO
-	return Callback{}, nil
+func (p *Payments) CreatePaymentOrder(ctx context.Context, input domain.CreateOrderInput) (domain.CreateOrderOutput, error) {
+	var out domain.CreateOrderOutput
+
+	err := input.Validate()
+	if err != nil {
+		return out, fmt.Errorf("%w: %s", ErrBadCreateOrderInput, err.Error())
+	}
+
+	pr, ok := p.methodToProviderMap[input.MethodID]
+	if !ok {
+		return out, ErrProviderNotFound
+	}
+
+	return pr.CreatePaymentOrder(ctx, input)
+}
+
+func (p *Payments) VerifyCallback(input domain.CallbackInput) (domain.CallbackOutput, error) {
+	pr, ok := p.providersMap[input.ProviderName]
+	if !ok {
+		return domain.CallbackOutput{}, ErrProviderNotFound
+	}
+
+	return pr.VerifyCallback(input)
 }

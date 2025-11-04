@@ -8,8 +8,8 @@ import (
 )
 
 const (
-	taskUpsertUser = "upsert"
-	taskRemoveUser = "remove"
+	taskUpsertConnection = "upsert"
+	taskRemoveConnection = "remove"
 )
 
 type storage interface {
