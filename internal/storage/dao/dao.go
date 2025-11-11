@@ -1,13 +1,14 @@
 package dao
 
 type PlanDAO struct {
-	ID       string `db:"id"`
-	Name     string `db:"name"`
-	Region   string `db:"region"`
-	Protocol string `db:"protocol"`
-	Amount   int64  `db:"amount"`
-	Currency string `db:"currency"`
-	Archived bool   `db:"archived"`
+	ID           string `db:"id"`
+	Name         string `db:"name"`
+	Region       string `db:"region"`
+	Protocol     string `db:"protocol"`
+	Amount       int64  `db:"amount"`
+	Currency     string `db:"currency"`
+	DurationDays int64  `db:"duration_days"`
+	Archived     bool   `db:"archived"`
 }
 
 type InvoiceDAO struct {
@@ -19,8 +20,9 @@ type InvoiceDAO struct {
 	Currency        string `db:"currency"`
 	Status          string `db:"status"`
 	CheckoutURL     string `db:"checkout_url"`
-	ExpiresAt       int64  `db:"expires_at"`
-	PaidAt          int64  `db:"paid_at"`
+	CreatedAt       string `db:"created_at"`
+	ExpiresAt       string `db:"expires_at"`
+	PaidAt          string `db:"paid_at"`
 }
 
 type Agent struct {

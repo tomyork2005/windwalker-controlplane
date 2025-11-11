@@ -28,12 +28,16 @@ var (
 )
 
 type InvoiceStatus string
+type SubscriptionStatus string
 
 const (
 	CreatedInvoiceStatus  InvoiceStatus = "created"
 	CanceledInvoiceStatus InvoiceStatus = "canceled"
 	SuccessInvoiceStatus  InvoiceStatus = "success"
 	UnknownInvoiceStatus  InvoiceStatus = "unknown"
+
+	ActiveSubscriptionStatus   SubscriptionStatus = "active"
+	InactiveSubscriptionStatus SubscriptionStatus = "inactive"
 )
 
 type User struct {
@@ -41,12 +45,13 @@ type User struct {
 	Username string
 }
 type Plan struct {
-	ID       string
-	Name     string
-	Region   string
-	Protocol string
-	Money    Money
-	Archived bool
+	ID           string
+	Name         string
+	Region       string
+	Protocol     string
+	Money        Money
+	DurationDays int64
+	Archived     bool
 }
 
 type Invoice struct {
@@ -94,6 +99,17 @@ type CallbackOutput struct {
 	PaidAt         time.Time
 }
 
+type Subscription struct {
+	ID         string
+	UserID     string
+	InvoiceID  string
+	PlanID     string
+	Status     SubscriptionStatus
+	StartAt    time.Time
+	EndAt      time.Time
+	CanceledAt time.Time
+}
+
 type Agent struct {
 	ID          string
 	InstanceID  string
@@ -101,17 +117,6 @@ type Agent struct {
 	Version     string
 	DriverTypes []string
 }
-
-type Subscription struct {
-	ID         string
-	UserID     string
-	PlanID     string
-	Status     string
-	StartAt    time.Time
-	EndAt      time.Time
-	CanceledAt time.Time
-}
-
 type AccessLink struct {
 	ID             string
 	UserID         string

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"control-plane/internal/domain"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -13,7 +14,7 @@ const (
 )
 
 type storage interface {
-	UpsertAgent(ctx context.Context, a Agent) error
+	UpsertAgent(ctx context.Context, agent domain.Agent) error
 	UpdateAgentHeartbeat(ctx context.Context, agentID string, uptime uint64, seenAt, deadline time.Time) error
 	MarkTaskAck(ctx context.Context, agentID string, seq uint64) error
 	MarkTaskNack(ctx context.Context, agentID string, seq uint64, errMsg string) error
@@ -23,9 +24,7 @@ type storage interface {
 	FindAgentIDByUserID(ctx context.Context, userID string) (string, error)
 	NextSeq(ctx context.Context, agentID string) (uint64, error)
 	EnqueueTask(ctx context.Context, task OutboxTask) error
-}
 
-type TxManager interface {
 	WithTx(context.Context, func(ctx context.Context) error) error
 }
 
@@ -36,7 +35,6 @@ type Clock interface {
 type Service struct {
 	store storage
 	clock Clock
-	tx    TxManager
 	reg   *registry
 
 	hbTTL time.Duration
@@ -64,7 +62,7 @@ func (s *Service) UpsertAgent(ctx context.Context, agent Agent) error {
 
 	err := s.store.UpsertAgent(ctx, agent)
 	if err != nil {
-		return fmt.Errorf("fail update heartbeat: %w", err)
+		return fmt.Errorf("fail upsert agent: %w", err)
 	}
 
 	now := s.clock.Now()

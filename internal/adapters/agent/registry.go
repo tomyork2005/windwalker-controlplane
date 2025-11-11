@@ -28,11 +28,11 @@ func newRegistry() *registry {
 	}
 }
 
-func (r *registry) addAgentOrSwap(s *session) (old *session) {
+func (r *registry) addAgentOrSwap(s *session) *session {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	old = r.byID[s.agentID]
+	old := r.byID[s.agentID]
 	r.byID[s.agentID] = s
 	return old
 }

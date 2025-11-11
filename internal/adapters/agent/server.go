@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	controlpb "control-plane/api/control"
+	"control-plane/internal/domain"
 	"errors"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -11,38 +12,42 @@ import (
 )
 
 type service interface {
-	UpsertAgent(ctx context.Context, agent Agent) error
+	UpsertAgent(ctx context.Context, agent domain.Agent) error
 
 	Ack(ctx context.Context, agentID string, seq uint64) error
 	Nack(ctx context.Context, agentID string, seq uint64, err string) error
 	Heartbeat(ctx context.Context, agentID string, uptimeSeconds uint32) error
+}
 
+type outbox interface {
 	FlushPending(ctx context.Context, agentID string, fromExclusive uint64, limit int) (wires []*controlpb.ControlToAgent, maxSeq uint64, err error)
 	MarkTaskSent(ctx context.Context, agentID string, seq uint64) error
 }
 
-type Manager struct {
+type Server struct {
 	svc             service
+	outbox          outbox
 	reg             *registry
 	hbTTL           time.Duration
 	outboxScanLimit int
 }
 
-func NewManager(svc service, reg *registry, hbTTL time.Duration) *Manager {
-	return &Manager{
+func NewManager(svc service, reg *registry, outbox outbox, hbTTL time.Duration) *Server {
+	return &Server{
 		svc:             svc,
 		reg:             reg,
+		outbox:          outbox,
 		hbTTL:           hbTTL,
 		outboxScanLimit: 256,
 	}
 }
 
-var _ controlpb.ControlPlaneServer = (*Manager)(nil)
+var _ controlpb.ControlPlaneServer = (*Server)(nil)
 
-func (m *Manager) Workstream(stream controlpb.ControlPlane_WorkstreamServer) error {
+func (s *Server) Workstream(stream controlpb.ControlPlane_WorkstreamServer) error {
 	ctx := stream.Context()
 
-	// Receive hello from vpn-agent
+	// Receive hello from vpn-agent / create agent
 	first, err := stream.Recv()
 	if err != nil {
 		if errors.Is(err, io.EOF) {
@@ -54,43 +59,43 @@ func (m *Manager) Workstream(stream controlpb.ControlPlane_WorkstreamServer) err
 	if hello == nil {
 		return status.Error(codes.InvalidArgument, "first message must be AgentHello")
 	}
-	agent := fromPBHello(hello)
+	agent := fromPBHelloToAgent(hello)
 
-	// Added to service and registry session (last-wins policy)
-	if err := m.svc.UpsertAgent(ctx, agent); err != nil {
+	// Added agent to service and registry
+	if err := s.svc.UpsertAgent(ctx, agent); err != nil {
 		return status.Errorf(codes.Internal, "handshake: %v", err)
 	}
 
 	sessCtx, cancel := context.WithCancel(ctx)
-	s := &session{
+	ss := &session{
 		agentID:     agent.ID,
 		region:      agent.Region,
 		driverTypes: toSet(agent.DriverTypes),
 		sendCh:      make(chan Operation, 1024),
 		cancel:      cancel,
 	}
-	if old := m.reg.addAgentOrSwap(s); old != nil {
+	if old := s.reg.addAgentOrSwap(ss); old != nil {
 		old.cancel()
 		close(old.sendCh)
 	}
 
 	// Send Welcome
-	if !trySend(s, &controlpb.ControlToAgent{
+	if !trySend(ss, &controlpb.ControlToAgent{
 		Msg: &controlpb.ControlToAgent_Welcome{
 			Welcome: &controlpb.Welcome{AgentId: agent.ID, Message: "hello"},
 		},
 	}) {
-		m.cleanupSession(s)
+		s.cleanupSession(ss)
 		return status.Error(codes.Unavailable, "send buffer full")
 	}
 
 	// Starting to send tasks that have been added when agent offline
-	s.recovering.Store(true)
-	go m.flushPending(sessCtx, s)
+	ss.recovering.Store(true)
+	go s.flushPending(sessCtx, ss)
 
-	// Starting send-worker and main cycle
+	// Starting workers
 	sendErrCh := make(chan error, 1)
-	go func() { sendErrCh <- sender(sessCtx, stream, s) }()
+	go func() { sendErrCh <- sender(sessCtx, stream, ss) }()
 
 	inCh := make(chan *controlpb.AgentToControl, 1)
 	recvErrCh := make(chan error, 1)
@@ -105,24 +110,24 @@ func (m *Manager) Workstream(stream controlpb.ControlPlane_WorkstreamServer) err
 		}
 	}()
 
-	hbTimer := time.NewTimer(m.hbTTL)
+	hbTimer := time.NewTimer(s.hbTTL)
 	defer hbTimer.Stop()
 
 	for {
 		select {
 		case in := <-inCh:
-			resetTimer(hbTimer, m.hbTTL)
+			resetTimer(hbTimer, s.hbTTL)
 
 			switch x := in.Msg.(type) {
 			case *controlpb.AgentToControl_Heartbeat:
-				_ = m.svc.Heartbeat(ctx, agent.ID, x.Heartbeat.GetUptimeSeconds())
+				_ = s.svc.Heartbeat(ctx, agent.ID, x.Heartbeat.GetUptimeSeconds())
 
 			case *controlpb.AgentToControl_Ack:
-				_ = m.svc.Ack(ctx, agent.ID, x.Ack.GetSeq())
-				s.lastAck.Store(x.Ack.GetSeq())
+				_ = s.svc.Ack(ctx, agent.ID, x.Ack.GetSeq())
+				ss.lastAck.Store(x.Ack.GetSeq())
 
 			case *controlpb.AgentToControl_Nack:
-				_ = m.svc.Nack(ctx, agent.ID, x.Nack.GetSeq(), x.Nack.GetError())
+				_ = s.svc.Nack(ctx, agent.ID, x.Nack.GetSeq(), x.Nack.GetError())
 
 			case *controlpb.AgentToControl_AllStats:
 
@@ -131,17 +136,17 @@ func (m *Manager) Workstream(stream controlpb.ControlPlane_WorkstreamServer) err
 			}
 
 		case recvErr := <-recvErrCh:
-			return m.finishStream(s, sendErrCh, normalizeRecvErr(recvErr))
+			return s.finishStream(ss, sendErrCh, normalizeRecvErr(recvErr))
 
 		case <-hbTimer.C:
-			return m.finishStream(s, sendErrCh, status.Error(codes.DeadlineExceeded, "heartbeat timeout"))
+			return s.finishStream(ss, sendErrCh, status.Error(codes.DeadlineExceeded, "heartbeat timeout"))
 		}
 
 	}
 }
 
-func (m *Manager) finishStream(s *session, sendErrCh <-chan error, cause error) error {
-	m.cleanupSession(s)
+func (s *Server) finishStream(ss *session, sendErrCh <-chan error, cause error) error {
+	s.cleanupSession(ss)
 
 	var sendErr error
 	if sendErrCh != nil {
@@ -211,32 +216,33 @@ func trySend(s *session, msg *controlpb.ControlToAgent) (ok bool) {
 	}
 }
 
-func (m *Manager) cleanupSession(s *session) {
-	s.cancel()
-	m.reg.remove(s.agentID)
-	close(s.sendCh)
+func (s *Server) cleanupSession(ss *session) {
+	ss.cancel()
+	s.reg.remove(ss.agentID)
+	close(ss.sendCh)
 }
 
-func (m *Manager) flushPending(ctx context.Context, s *session) {
-	from := s.lastAck.Load()
+func (s *Server) flushPending(ctx context.Context, ss *session) {
+	from := ss.lastAck.Load()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
+
 		}
-		wires, maxSeq, err := m.svc.FlushPending(ctx, s.agentID, from, m.outboxScanLimit)
+		wires, maxSeq, err := s.outbox.FlushPending(ctx, ss.agentID, from, s.outboxScanLimit)
 		if err != nil {
 			return
 		}
 		if len(wires) == 0 {
-			s.recovering.Store(false)
+			ss.recovering.Store(false)
 			return
 		}
 		for _, w := range wires {
-			if trySend(s, w) {
+			if trySend(ss, w) {
 				if t := w.GetTask(); t != nil {
-					_ = m.svc.MarkTaskSent(ctx, s.agentID, t.Meta.Seq)
+					_ = s.outbox.MarkTaskSent(ctx, ss.agentID, t.Meta.Seq)
 				}
 			}
 		}

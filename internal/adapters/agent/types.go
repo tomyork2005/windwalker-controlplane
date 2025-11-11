@@ -2,34 +2,14 @@ package agent
 
 import (
 	controlpb "control-plane/api/control"
+	"control-plane/internal/domain"
 	"fmt"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"time"
 )
 
-type Agent struct {
-	ID          string
-	InstanceID  string
-	Region      string
-	Version     string
-	DriverTypes []string
-}
-
-func (a *Agent) Validate() error {
-	if a.ID == "" {
-		return fmt.Errorf("agent_id is required")
-	}
-	if a.Region == "" {
-		return fmt.Errorf("region is required")
-	}
-	if len(a.DriverTypes) == 0 {
-		return fmt.Errorf("driver_types must not be empty")
-	}
-	return nil
-}
-
-func fromPBHello(pb *controlpb.AgentHello) Agent {
-	return Agent{
+func fromPBHelloToAgent(pb *controlpb.AgentHello) domain.Agent {
+	return domain.Agent{
 		ID:          pb.GetAgentId(),
 		InstanceID:  pb.GetInstanceId(),
 		Region:      pb.GetRegion(),

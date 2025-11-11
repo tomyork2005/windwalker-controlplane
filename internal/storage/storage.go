@@ -3,5 +3,5 @@ package storage
 import "errors"
 
 var (
-	ErrNotFound = errors.New("storage not found")
+	ErrNotFound = errors.New("storage row not found")
 )
