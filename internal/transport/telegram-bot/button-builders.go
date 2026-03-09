@@ -1,14 +1,14 @@
 package bot
 
 import (
-	"control-plane/internal/domain"
+	"control-plane/internal/model"
 	"fmt"
 	tele "gopkg.in/telebot.v4"
 	"sort"
 	"strings"
 )
 
-func buildRegionBtns(plans []domain.Plan) *tele.ReplyMarkup {
+func buildRegionBtns(plans []*model.Plan) *tele.ReplyMarkup {
 	set := map[string]struct{}{}
 	for _, p := range plans {
 		if p.Archived {
@@ -43,14 +43,14 @@ func buildRegionBtns(plans []domain.Plan) *tele.ReplyMarkup {
 	return &kb
 }
 
-func buildProtocolBtns(plans []domain.Plan, region string) *tele.ReplyMarkup {
+func buildProtocolBtns(plans []*model.Plan, region string) *tele.ReplyMarkup {
 	set := map[string]struct{}{}
 	for _, p := range plans {
 		if p.Archived || p.Region != region {
 			continue
 		}
-		if p.Protocol != "" {
-			set[p.Protocol] = struct{}{}
+		if p.DriverType != "" {
+			set[p.DriverType] = struct{}{}
 		}
 	}
 	if len(set) == 0 {
@@ -82,13 +82,13 @@ func buildProtocolBtns(plans []domain.Plan, region string) *tele.ReplyMarkup {
 }
 
 // One in row
-func buildDurationBtns(plans []domain.Plan, region, proto string) *tele.ReplyMarkup {
-	filtered := make([]domain.Plan, 0)
+func buildDurationBtns(plans []*model.Plan, region, proto string) *tele.ReplyMarkup {
+	filtered := make([]*model.Plan, 0)
 	for _, p := range plans {
 		if p.Archived {
 			continue
 		}
-		if p.Region == region && p.Protocol == proto {
+		if p.Region == region && p.DriverType == proto {
 			filtered = append(filtered, p)
 		}
 	}
@@ -112,7 +112,7 @@ func buildDurationBtns(plans []domain.Plan, region, proto string) *tele.ReplyMar
 	return &kb
 }
 
-func buildPaymentMethodBtns(methods []domain.PaymentMethod, planID string) *tele.ReplyMarkup {
+func buildPaymentMethodBtns(methods []*model.PaymentMethod, planID string) *tele.ReplyMarkup {
 	var kb tele.ReplyMarkup
 	var rows []tele.Row
 	for _, method := range methods {

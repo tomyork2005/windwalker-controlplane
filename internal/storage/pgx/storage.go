@@ -12,7 +12,7 @@ type Storage struct {
 	txManager *TxManager
 }
 
-func NewPgxStorage(ctx context.Context, connString string) (*Storage, error) {
+func New(ctx context.Context, connString string) (*Storage, error) {
 	config, err := pgxpool.ParseConfig(connString)
 	if err != nil {
 		return nil, err
@@ -50,4 +50,8 @@ func (s *Storage) Ping(ctx context.Context) error {
 
 func (s *Storage) Close() {
 	s.pool.Close()
+}
+
+func (s *Storage) WithTx(ctx context.Context, fn func(ctx context.Context) error) error {
+	return s.txManager.WithTx(ctx, fn)
 }

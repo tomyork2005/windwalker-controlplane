@@ -3,8 +3,8 @@ package freekassa
 import (
 	"bytes"
 	"context"
-	"control-plane/internal/adapters/payment"
-	"control-plane/internal/core"
+	"control-plane/internal/model"
+	"control-plane/internal/payment"
 	"crypto/hmac"
 	"crypto/md5"
 	"crypto/sha256"
@@ -25,8 +25,6 @@ type Provider struct {
 	nonce Noncer
 }
 
-var _ core.PaymentProvider = (*Provider)(nil)
-
 func NewProvider(cfg *Config, httpC *http.Client, nonce Noncer) *Provider {
 	if cfg.BaseAPI == "" {
 		cfg.BaseAPI = "https://api.fk.life/v1"
@@ -37,10 +35,10 @@ func NewProvider(cfg *Config, httpC *http.Client, nonce Noncer) *Provider {
 	return &Provider{cfg: cfg, httpC: httpC, nonce: nonce}
 }
 
-func (p *Provider) CreatePaymentOrder(ctx context.Context, in payment.CreateOrderInput) (payment.CreateOrderOutput, error) {
+func (p *Provider) CreatePaymentOrder(ctx context.Context, in model.CreateOrderInput) (model.CreateOrderOutput, error) {
 	err := in.Validate()
 	if err != nil {
-		return payment.CreateOrderOutput{}, err
+		return model.CreateOrderOutput{}, err
 	}
 
 	// Check method id is available
@@ -56,7 +54,7 @@ func (p *Provider) CreatePaymentOrder(ctx context.Context, in payment.CreateOrde
 	body, _ := json.Marshal(params)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s%s%s%s", p.cfg.BaseAPI, "/currencies/", in.MethodID, "/status"), bytes.NewBuffer(body))
 	if err != nil {
-		return payment.CreateOrderOutput{}, err
+		return model.CreateOrderOutput{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
@@ -149,7 +147,7 @@ func (p *Provider) VerifyCallback(r *http.Request) (payment.Callback, error) {
 
 	if !hmac.Equal([]byte(exp), []byte(strings.ToLower(callback.Signature))) &&
 		!hmac.Equal([]byte(exp), []byte(callback.Signature)) {
-		return payment.Callback{}, payment.ErrBadSignature
+		return payment.Callback{}, payment2.ErrBadSignature
 	}
 
 	return callback, nil

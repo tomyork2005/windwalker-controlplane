@@ -3,6 +3,8 @@ package cryptocloud
 import (
 	"bytes"
 	"context"
+	"control-plane/internal/config"
+	"control-plane/internal/payment"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,8 +12,7 @@ import (
 	"net/http"
 	"time"
 
-	"control-plane/internal/adapters/payment"
-	"control-plane/internal/domain"
+	"control-plane/internal/model"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -19,11 +20,11 @@ import (
 const providerName = "CryptoCloud"
 
 type Provider struct {
-	cfg   Config
+	cfg   config.CryptoCloudConfig
 	httpC *http.Client
 }
 
-func NewProvider(cfg Config, client *http.Client) *Provider {
+func NewProvider(cfg config.CryptoCloudConfig, client *http.Client) *Provider {
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = "https://api.cryptocloud.plus/v2"
 	}
@@ -45,10 +46,10 @@ func (p *Provider) Methods() []string {
 	return p.cfg.Methods
 }
 
-func (p *Provider) CreatePaymentOrder(ctx context.Context, input domain.CreateOrderInput) (domain.CreateOrderOutput, error) {
-	var out domain.CreateOrderOutput
+func (p *Provider) CreatePaymentOrder(ctx context.Context, input model.CreateOrderInput) (model.CreateOrderOutput, error) {
+	var out model.CreateOrderOutput
 
-	if input.Money.Curr != domain.USDCurrency {
+	if input.Money.Curr != model.USDCurrency {
 		return out, errors.New("for crypto payment method currency must be USD")
 	}
 
@@ -56,7 +57,7 @@ func (p *Provider) CreatePaymentOrder(ctx context.Context, input domain.CreateOr
 	params := map[string]any{
 		"shop_id":  p.cfg.ShopID,
 		"amount":   amount,
-		"currency": string(domain.USDCurrency),
+		"currency": string(model.USDCurrency),
 		"order_id": input.InvoiceID,
 		"email":    p.cfg.DefaultEmail,
 		"add_fields": map[string]any{
@@ -107,7 +108,7 @@ func (p *Provider) CreatePaymentOrder(ctx context.Context, input domain.CreateOr
 		return out, fmt.Errorf("cryptocloud: parse expiry date: %w", err)
 	}
 
-	out = domain.CreateOrderOutput{
+	out = model.CreateOrderOutput{
 		ProviderName:    providerName,
 		RedirectURL:     response.Result.Link,
 		ProviderOrderID: response.Result.UUID,
@@ -118,8 +119,8 @@ func (p *Provider) CreatePaymentOrder(ctx context.Context, input domain.CreateOr
 	return out, nil
 }
 
-func (p *Provider) VerifyCallback(input domain.CallbackInput) (domain.CallbackOutput, error) {
-	var out domain.CallbackOutput
+func (p *Provider) VerifyCallback(input model.CallbackInput) (model.CallbackOutput, error) {
+	var out model.CallbackOutput
 
 	var payload postbackPayload
 	if err := json.Unmarshal(input.Body, &payload); err != nil {
@@ -140,7 +141,7 @@ func (p *Provider) VerifyCallback(input domain.CallbackInput) (domain.CallbackOu
 			payload.InvoiceInfo.DateFinished, err)
 	}
 
-	out = domain.CallbackOutput{
+	out = model.CallbackOutput{
 		ProviderName:   p.Name(),
 		Status:         mapStatus(payload.InvoiceInfo.InvoiceStatus),
 		InvoiceID:      payload.OrderID,   // inbound id
@@ -183,13 +184,13 @@ func parseCloudCryptoTime(s string) (time.Time, error) {
 	return time.ParseInLocation(layout, s, time.UTC)
 }
 
-func mapStatus(status string) domain.InvoiceStatus {
+func mapStatus(status string) model.InvoiceStatus {
 	switch status {
 	case "success":
-		return domain.SuccessInvoiceStatus
+		return model.SuccessInvoiceStatus
 	case "failed":
-		return domain.CanceledInvoiceStatus
+		return model.CanceledInvoiceStatus
 	default:
-		return domain.UnknownInvoiceStatus
+		return model.UnknownInvoiceStatus
 	}
 }

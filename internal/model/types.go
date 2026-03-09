@@ -1,4 +1,4 @@
-package domain
+package model
 
 import (
 	"errors"
@@ -48,7 +48,7 @@ type Plan struct {
 	ID           string
 	Name         string
 	Region       string
-	Protocol     string
+	DriverType   string
 	Money        Money
 	DurationDays int64
 	Archived     bool
@@ -58,6 +58,7 @@ type Invoice struct {
 	ID              string
 	UserID          string
 	PlanID          string
+	ChatID          string
 	PaymentProvider string
 	Money           Money
 	Status          InvoiceStatus
@@ -68,8 +69,8 @@ type Invoice struct {
 }
 
 type PaymentMethod struct {
-	ID   string
-	Name string
+	ID   string `db:"id"`
+	Name string `db:"name"`
 }
 
 type CreateOrderInput struct {
@@ -117,6 +118,11 @@ type Agent struct {
 	Version     string
 	DriverTypes []string
 }
+
+func (a *Agent) Validate() error {
+	return nil
+}
+
 type AccessLink struct {
 	ID             string
 	UserID         string

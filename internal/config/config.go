@@ -11,9 +11,15 @@ import (
 
 type Config struct {
 	Env                 string `yaml:"env" env-default:"local"`
-	SQLiteConfig        `yaml:"storage_sqlite"`
+	Postgres            `yaml:"postgres"`
+	TelegramConfig      `yaml:"telegram"`
 	XrayConfig          `yaml:"driver_xray"`
 	TransportGrpcConfig `yaml:"transport_grpc"`
+	CryptoCloudConfig   `yaml:"crypto_cloud"`
+}
+
+type Postgres struct {
+	ConnectionString string `yaml:"connection_string" env-required:"true"`
 }
 
 type TelegramConfig struct {
@@ -45,6 +51,16 @@ type TransportGrpcConfig struct {
 	ReconnectMin    time.Duration `yaml:"reconnect_min" env-default:"5s"`
 	ReconnectMax    time.Duration `yaml:"reconnect_max" env-default:"5s"`
 	DialTimeout     time.Duration `yaml:"dial_timeout" env-default:"5s"`
+}
+
+type CryptoCloudConfig struct {
+	ApiKey       string
+	ShopID       string
+	ApiSecret    string
+	BaseURL      string
+	OrderTTL     int // hours
+	DefaultEmail string
+	Methods      []string
 }
 
 func MustLoadConfig() *Config {

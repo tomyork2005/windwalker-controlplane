@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"control-plane/internal/model"
+	"errors"
 	"sync"
 	"sync/atomic"
 )
@@ -11,10 +13,12 @@ type session struct {
 	region      string
 	driverTypes map[string]struct{}
 
-	sendCh     chan Operation
-	lastAck    atomic.Uint64
+	sendCh     chan model.Operation
+	lastSeq    atomic.Uint64
 	recovering atomic.Bool
-	cancel     context.CancelFunc
+
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 type registry struct {
@@ -50,16 +54,16 @@ func (r *registry) get(agentID string) (*session, bool) {
 	return s, ok
 }
 
-func (r *registry) trySend(op Operation) bool {
+func (r *registry) trySend(op model.Operation) error {
 	s, ok := r.get(op.AgentID)
 	if !ok {
-		return false
+		return errors.New("agent not found")
 	}
 	select {
 	case s.sendCh <- op:
-		return true
+		return nil
 	default:
-		return false
+		return errors.New("unknown error when trySend to agent")
 	}
 }
 
@@ -69,4 +73,18 @@ func toSet(ss []string) map[string]struct{} {
 		m[s] = struct{}{}
 	}
 	return m
+}
+
+func newSessionFromAgent(ctx context.Context, agent *model.Agent) *session {
+	sessCtx, cancel := context.WithCancel(ctx)
+
+	return &session{
+		agentID:     agent.ID,
+		region:      agent.Region,
+		driverTypes: toSet(agent.DriverTypes),
+		sendCh:      make(chan model.Operation, 1024),
+
+		cancel: cancel,
+		ctx:    sessCtx,
+	}
 }

@@ -6,16 +6,16 @@ import (
 	"time"
 
 	"control-plane/internal/config"
-	"control-plane/internal/domain"
+	"control-plane/internal/model"
 
 	tele "gopkg.in/telebot.v4"
 	"gopkg.in/telebot.v4/middleware"
 )
 
 type ShopService interface {
-	ListPlans(ctx context.Context) ([]domain.Plan, error)
-	ListPaymentMethods(ctx context.Context) ([]domain.PaymentMethod, error)
-	CreateInvoice(ctx context.Context, planID string, username string, methodID string) (domain.Invoice, error)
+	ListPlans(ctx context.Context) ([]*model.Plan, error)
+	ListPaymentMethods(ctx context.Context) ([]*model.PaymentMethod, error)
+	CreateInvoice(ctx context.Context, planID, username, methodID, chatID string) (*model.Invoice, error)
 }
 
 type action string
@@ -28,7 +28,6 @@ const (
 
 	actMenuBuy     action = "menu_buy"
 	actMenuProfile action = "profile"
-	// adm_* и т.п.
 )
 
 var cbRouter = map[action]func(*Bot, tele.Context, string) error{
@@ -211,7 +210,7 @@ func (b *Bot) onPickDuration(c tele.Context, planID string) error {
 }
 
 func (b *Bot) onPickPaymentMethod(c tele.Context, payload string) error {
-	ctx, cancel := context.WithTimeout(b.appCtx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(b.appCtx, 10*time.Second)
 	defer cancel()
 
 	methodID, planID := unpackMethodPayload(payload)
@@ -223,7 +222,7 @@ func (b *Bot) onPickPaymentMethod(c tele.Context, payload string) error {
 		username = fmt.Sprintf("tg_%d", c.Sender().ID)
 	}
 
-	inv, err := b.svc.CreateInvoice(ctx, planID, username, methodID)
+	inv, err := b.svc.CreateInvoice(ctx, planID, username, methodID, fmt.Sprintf("%d", c.Chat().ID))
 	if err != nil {
 		return c.Respond(&tele.CallbackResponse{Text: "Не удалось создать счёт"})
 	}

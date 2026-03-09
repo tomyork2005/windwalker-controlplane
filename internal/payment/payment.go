@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	
-	"control-plane/internal/domain"
+
+	"control-plane/internal/model"
 )
 
 var (
@@ -17,8 +17,8 @@ var (
 type Provider interface {
 	Name() string
 	Methods() []string
-	CreatePaymentOrder(ctx context.Context, input domain.CreateOrderInput) (domain.CreateOrderOutput, error)
-	VerifyCallback(input domain.CallbackInput) (domain.CallbackOutput, error)
+	CreatePaymentOrder(ctx context.Context, input model.CreateOrderInput) (model.CreateOrderOutput, error)
+	VerifyCallback(input model.CallbackInput) (model.CallbackOutput, error)
 }
 
 type Payments struct {
@@ -26,7 +26,7 @@ type Payments struct {
 	methodToProviderMap map[string]Provider
 }
 
-func NewPayments(providers ...Provider) *Payments {
+func NewPayment(providers ...Provider) *Payments {
 	providersMap := make(map[string]Provider, len(providers))
 	methodToProviderMap := make(map[string]Provider, len(providers))
 
@@ -40,8 +40,8 @@ func NewPayments(providers ...Provider) *Payments {
 	return &Payments{providersMap, methodToProviderMap}
 }
 
-func (p *Payments) CreatePaymentOrder(ctx context.Context, input domain.CreateOrderInput) (domain.CreateOrderOutput, error) {
-	var out domain.CreateOrderOutput
+func (p *Payments) CreatePaymentOrder(ctx context.Context, input model.CreateOrderInput) (model.CreateOrderOutput, error) {
+	var out model.CreateOrderOutput
 
 	err := input.Validate()
 	if err != nil {
@@ -56,10 +56,10 @@ func (p *Payments) CreatePaymentOrder(ctx context.Context, input domain.CreateOr
 	return pr.CreatePaymentOrder(ctx, input)
 }
 
-func (p *Payments) VerifyCallback(input domain.CallbackInput) (domain.CallbackOutput, error) {
+func (p *Payments) VerifyCallback(input model.CallbackInput) (model.CallbackOutput, error) {
 	pr, ok := p.providersMap[input.ProviderName]
 	if !ok {
-		return domain.CallbackOutput{}, ErrProviderNotFound
+		return model.CallbackOutput{}, ErrProviderNotFound
 	}
 
 	return pr.VerifyCallback(input)

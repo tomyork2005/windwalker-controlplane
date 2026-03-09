@@ -2,7 +2,7 @@ package http
 
 import (
 	"context"
-	"control-plane/internal/domain"
+	"control-plane/internal/model"
 	"io"
 	"net/http"
 
@@ -10,12 +10,12 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
-type service interface {
-	ProcessPaymentCallback(ctx context.Context, req domain.CallbackInput) error
+type ProcessService interface {
+	ProcessPaymentCallback(ctx context.Context, req model.CallbackInput) error
 }
 
 type Handler struct {
-	svc service
+	svc ProcessService
 }
 
 func (h *Handler) Routes() chi.Router {
@@ -38,13 +38,12 @@ func (h *Handler) CallbackCryptoCloud(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req := domain.CallbackInput{
+	req := model.CallbackInput{
 		ProviderName: "CryptoCloud",
 		Body:         raw,
 	}
 	err = h.svc.ProcessPaymentCallback(r.Context(), req)
 	if err != nil {
-		// todo error route
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}

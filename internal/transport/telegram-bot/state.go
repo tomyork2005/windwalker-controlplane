@@ -1,7 +1,7 @@
 package bot
 
 import (
-	"control-plane/internal/domain"
+	"control-plane/internal/model"
 	"sync"
 )
 
@@ -13,13 +13,13 @@ type orderState struct {
 type SafeState struct {
 	mu sync.RWMutex
 	m  map[int64]orderState    // key - telebot.Context.ID(), value - user order state
-	p  map[int64][]domain.Plan // actual plans, update at start new payment
+	p  map[int64][]*model.Plan // actual plans, update at start new payment
 }
 
 func NewSafeState() *SafeState {
 	return &SafeState{
 		m: make(map[int64]orderState, 128),
-		p: make(map[int64][]domain.Plan, 128),
+		p: make(map[int64][]*model.Plan, 128),
 	}
 }
 
@@ -57,17 +57,17 @@ func (s *SafeState) Update(id int64, fn func(cur orderState, ok bool) (next orde
 	return next, true
 }
 
-func (s *SafeState) GetActualPlans(id int64) ([]domain.Plan, bool) {
+func (s *SafeState) GetActualPlans(id int64) ([]*model.Plan, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	v, ok := s.p[id]
 	return v, ok
 }
 
-func (s *SafeState) SetActualPlans(id int64, plans []domain.Plan) {
+func (s *SafeState) SetActualPlans(id int64, plans []*model.Plan) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cp := make([]domain.Plan, len(plans))
+	cp := make([]*model.Plan, len(plans))
 	copy(cp, plans)
 	s.p[id] = cp
 }
