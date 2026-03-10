@@ -39,41 +39,36 @@ func NewDispatcher(store DispatchStorage, transport DispatcherSender) *Dispatche
 	}
 }
 
-func (d *Dispatcher) DispatchUpsert(ctx context.Context, agentID string, subscriptionID string, up *model.AgentUpsertPayload) error {
+func (d *Dispatcher) DispatchUpsert(ctx context.Context, agentID string, subscriptionID string, up *model.AgentUpsertPayload) (*model.Operation, error) {
 	payload, err := json.Marshal(up)
 	if err != nil {
-		return fmt.Errorf("marshal upsert payload: %w", err)
+		return nil, fmt.Errorf("marshal upsert payload: %w", err)
 	}
 
 	var seq uint64
-	err = d.store.WithTx(ctx, func(ctx context.Context) error {
-		seq, err = d.store.NextSeq(ctx, agentID)
-		if err != nil {
-			return err
-		}
-
-		return d.store.EnqueueTask(ctx, &model.AgentTask{
-			AgentID:   agentID,
-			Seq:       seq,
-			RequestID: subscriptionID,
-			Kind:      model.OpUpsert,
-			Payload:   payload,
-		})
-	})
+	seq, err = d.store.NextSeq(ctx, agentID)
 	if err != nil {
-		return fmt.Errorf("enqueue upsert task: %w", err)
+		return nil, err
 	}
 
-	op := model.Operation{
+	err = d.store.EnqueueTask(ctx, &model.AgentTask{
+		AgentID:   agentID,
+		Seq:       seq,
+		RequestID: subscriptionID,
+		Kind:      model.OpUpsert,
+		Payload:   payload,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("enqueue upsert task: %w", err)
+	}
+
+	return &model.Operation{
 		AgentID:   agentID,
 		Seq:       seq,
 		RequestID: subscriptionID,
 		Kind:      model.OpUpsert,
 		Upsert:    up,
-	}
-
-	d.trySend(ctx, op)
-	return nil
+	}, nil
 }
 
 func (d *Dispatcher) DispatchRemove(ctx context.Context, agentID string, requestID string, rm *model.AgentRemovePayload) error {
@@ -111,6 +106,10 @@ func (d *Dispatcher) DispatchRemove(ctx context.Context, agentID string, request
 
 	d.trySend(ctx, op)
 	return nil
+}
+
+func (d *Dispatcher) TryDispatchPrepared(ctx context.Context, op *model.Operation) {
+	d.trySend(ctx, *op)
 }
 
 func (d *Dispatcher) RecoverPending(ctx context.Context, agentID string, fromExclusive uint64, limit int) error {

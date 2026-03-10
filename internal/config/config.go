@@ -1,21 +1,20 @@
 package config
 
 import (
-	"github.com/google/uuid"
+	"github.com/ilyakaznacheev/cleanenv"
 	"log"
 	"os"
-	"time"
-
-	"github.com/ilyakaznacheev/cleanenv"
 )
 
 type Config struct {
-	Env                 string `yaml:"env" env-default:"local"`
-	Postgres            `yaml:"postgres"`
-	TelegramConfig      `yaml:"telegram"`
-	XrayConfig          `yaml:"driver_xray"`
-	TransportGrpcConfig `yaml:"transport_grpc"`
-	CryptoCloudConfig   `yaml:"crypto_cloud"`
+	Postgres       `yaml:"postgres"`
+	TelegramConfig `yaml:"telegram"`
+	AgentConfig    `yaml:"agent"`
+	GRPCConfig     `yaml:"grpc"`
+	HTTPConfig     `yaml:"http"`
+
+	// payments config
+	CryptoCloudConfig `yaml:"crypto_cloud"`
 }
 
 type Postgres struct {
@@ -29,38 +28,26 @@ type TelegramConfig struct {
 	WebhookSecret    string `yaml:"webhook_secret" env:"TELEGRAM_SECRET"`
 }
 
-type XrayConfig struct {
-	ServiceName string        `yaml:"service_name" env-default:"xray"`
-	APIAddr     string        `yaml:"api_addr" env-default:"127.0.0.1:10085"`
-	InboundTag  string        `yaml:"inbound_tag" env-default:"vless-in"`
-	Protocol    string        `yaml:"protocol" env-default:"vless"`
-	OpTimeout   time.Duration `yaml:"op_timeout" env-default:"5s"`
-	VlessFlow   string        `yaml:"vless_flow" env-default:"xtls-rprx-vision"`
-}
-
-type TransportGrpcConfig struct {
-	Address     string   `yaml:"address" env-default:""`
-	AgentID     string   `yaml:"agent_id" env-default:""`
-	InstanceID  string   `yaml:"instance_id" env-default:""`
-	Region      string   `yaml:"region" env-default:""`
-	Version     string   `yaml:"version" env-default:""`
-	DriverTypes []string `yaml:"driver_types" env-default:"xray"`
-
-	HeartbeatPeriod time.Duration `yaml:"heartbeat_period" env-default:"5s"`
-	SendQueueSize   int           `yaml:"send_queue_size" env-default:"0"`
-	ReconnectMin    time.Duration `yaml:"reconnect_min" env-default:"5s"`
-	ReconnectMax    time.Duration `yaml:"reconnect_max" env-default:"5s"`
-	DialTimeout     time.Duration `yaml:"dial_timeout" env-default:"5s"`
+type AgentConfig struct {
+	HeartbeatIntervalMinutes int `yaml:"heartbeat_interval" env:"HEARTBEAT_INTERVAL"`
 }
 
 type CryptoCloudConfig struct {
-	ApiKey       string
-	ShopID       string
-	ApiSecret    string
-	BaseURL      string
-	OrderTTL     int // hours
-	DefaultEmail string
-	Methods      []string
+	ApiKey       string   `yaml:"api_key" env:"API_KEY"`
+	ShopID       string   `yaml:"shop_id" env:"SHOP_ID"`
+	ApiSecret    string   `yaml:"api_secret" env:"API_SECRET"`
+	BaseURL      string   `yaml:"base_url" env:"BASE_URL"`
+	OrderTTL     int      `yaml:"order_ttl" env:"ORDER_TTL"`
+	DefaultEmail string   `yaml:"default_email" env:"DEFAULT_EMAIL"`
+	Methods      []string `yaml:"methods" env:"METHODS"`
+}
+
+type HTTPConfig struct {
+	Port string `yaml:"port" env:"HTTP_PORT"`
+}
+
+type GRPCConfig struct {
+	Port string `yaml:"port" env:"GRPC_PORT"`
 }
 
 func MustLoadConfig() *Config {
@@ -77,8 +64,6 @@ func MustLoadConfig() *Config {
 	if err := cleanenv.ReadConfig(configEnv, &config); err != nil {
 		log.Fatalf("fail with read configs %s", err)
 	}
-
-	config.InstanceID = uuid.NewString()
 
 	return &config
 }

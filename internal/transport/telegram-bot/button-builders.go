@@ -114,11 +114,15 @@ func buildDurationBtns(plans []*model.Plan, region, proto string) *tele.ReplyMar
 
 func buildPaymentMethodBtns(methods []*model.PaymentMethod, planID string) *tele.ReplyMarkup {
 	var kb tele.ReplyMarkup
-	var rows []tele.Row
+	rows := []tele.Row{
+		kb.Row(kb.Data("⬅ Back to durations", string(actPickDuration), "__back__")),
+	}
+
 	for _, method := range methods {
 		payload := packMethodPayload(method.ID, planID)
 		rows = append(rows, kb.Row(kb.Data(method.Name, string(actPickPaymentMethod), payload)))
 	}
+
 	kb.Inline(rows...)
 	return &kb
 }

@@ -31,17 +31,17 @@ type Dispatcher interface {
 type Server struct {
 	svc             Service
 	dispatcher      Dispatcher
-	reg             *registry
+	hub             *Hub
 	hbTTL           time.Duration
 	outboxScanLimit int
 
 	controlpb.UnimplementedControlPlaneServer
 }
 
-func NewManager(svc Service, dispatcher Dispatcher, hbTTL time.Duration) *Server {
+func NewServer(svc Service, dispatcher Dispatcher, hub *Hub, hbTTL time.Duration) *Server {
 	return &Server{
 		svc:             svc,
-		reg:             newRegistry(),
+		hub:             hub,
 		dispatcher:      dispatcher,
 		hbTTL:           hbTTL,
 		outboxScanLimit: 256,
@@ -73,12 +73,12 @@ func (s *Server) Workstream(stream controlpb.ControlPlane_WorkstreamServer) erro
 	}
 
 	agentSession := newSessionFromAgent(ctx, agent)
-	if old := s.reg.addAgentOrSwap(agentSession); old != nil {
+	if old := s.hub.addAgentOrSwap(agentSession); old != nil {
 		old.cancel()
 		close(old.sendCh)
 	}
 
-	err = s.reg.trySend(model.Operation{AgentID: agent.ID, Kind: model.OpHello})
+	err = s.hub.TrySend(model.Operation{AgentID: agent.ID, Kind: model.OpHello})
 	if err != nil {
 		s.cleanupSession(agentSession)
 		return status.Error(codes.Unavailable, "send buffer full")
@@ -193,7 +193,7 @@ func resetTimer(t *time.Timer, d time.Duration) {
 
 func (s *Server) cleanupSession(ss *session) {
 	ss.cancel()
-	s.reg.remove(ss.agentID)
+	s.hub.remove(ss.agentID)
 	close(ss.sendCh)
 }
 

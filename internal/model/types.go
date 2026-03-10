@@ -58,7 +58,7 @@ type Invoice struct {
 	ID              string
 	UserID          string
 	PlanID          string
-	ChatID          string
+	ChatID          int64
 	PaymentProvider string
 	Money           Money
 	Status          InvoiceStatus
@@ -101,14 +101,13 @@ type CallbackOutput struct {
 }
 
 type Subscription struct {
-	ID         string
-	UserID     string
-	InvoiceID  string
-	PlanID     string
-	Status     SubscriptionStatus
-	StartAt    time.Time
-	EndAt      time.Time
-	CanceledAt time.Time
+	ID        string
+	UserID    string
+	InvoiceID string
+	PlanID    string
+	Status    SubscriptionStatus
+	StartAt   time.Time
+	EndAt     time.Time
 }
 
 type Agent struct {

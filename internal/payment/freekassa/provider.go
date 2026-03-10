@@ -1,21 +1,7 @@
 package freekassa
 
 import (
-	"bytes"
-	"context"
-	"control-plane/internal/model"
-	"control-plane/internal/payment"
-	"crypto/hmac"
-	"crypto/md5"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
-	"fmt"
-	"io"
-	"net"
 	"net/http"
-	"sort"
-	"strings"
 	"time"
 )
 
@@ -35,7 +21,7 @@ func NewProvider(cfg *Config, httpC *http.Client, nonce Noncer) *Provider {
 	return &Provider{cfg: cfg, httpC: httpC, nonce: nonce}
 }
 
-func (p *Provider) CreatePaymentOrder(ctx context.Context, in model.CreateOrderInput) (model.CreateOrderOutput, error) {
+/*func (p *Provider) CreatePaymentOrder(ctx context.Context, in model.CreateOrderInput) (model.CreateOrderOutput, error) {
 	err := in.Validate()
 	if err != nil {
 		return model.CreateOrderOutput{}, err
@@ -147,7 +133,7 @@ func (p *Provider) VerifyCallback(r *http.Request) (payment.Callback, error) {
 
 	if !hmac.Equal([]byte(exp), []byte(strings.ToLower(callback.Signature))) &&
 		!hmac.Equal([]byte(exp), []byte(callback.Signature)) {
-		return payment.Callback{}, payment2.ErrBadSignature
+		return model.Callback{}, model2.ErrBadSignature
 	}
 
 	return callback, nil
@@ -203,3 +189,4 @@ type createOrderResponse struct {
 		PayDateAt string `json:"pay_date_at"`
 	} `json:"recurrent_order,omitempty"`
 }
+*/

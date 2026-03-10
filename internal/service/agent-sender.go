@@ -3,18 +3,25 @@ package service
 import (
 	"context"
 	"control-plane/internal/model"
+	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 )
 
 type AgentSenderStorage interface {
 	ChooseBestAgent(ctx context.Context, driverType string, region string) (string, error)
+	BindSubscriptionToAgent(ctx context.Context, subscriptionID string, agentID string) error
 	FindAgentIDByUserID(ctx context.Context, userID string) (string, error)
+
+	WithTx(ctx context.Context, fn func(ctx context.Context) error) error
 }
 
 type AgentDispatcher interface {
-	DispatchUpsert(ctx context.Context, agentID string, subscriptionID string, payload *model.AgentUpsertPayload) error
+	DispatchUpsert(ctx context.Context, agentID string, subscriptionID string, payload *model.AgentUpsertPayload) (*model.Operation, error)
 	DispatchRemove(ctx context.Context, agentID string, subscriptionID string, payload *model.AgentRemovePayload) error
+
+	TryDispatchPrepared(ctx context.Context, op *model.Operation)
 }
 
 type AgentSender struct {
@@ -22,7 +29,7 @@ type AgentSender struct {
 	dispatcher AgentDispatcher
 }
 
-func NewAgentService(store AgentSenderStorage, dispatcher AgentDispatcher) *AgentSender {
+func NewAgentSender(store AgentSenderStorage, dispatcher AgentDispatcher) *AgentSender {
 	return &AgentSender{
 		store:      store,
 		dispatcher: dispatcher,
@@ -30,27 +37,44 @@ func NewAgentService(store AgentSenderStorage, dispatcher AgentDispatcher) *Agen
 }
 
 func (s *AgentSender) StartUserSubscribe(ctx context.Context, input model.SubscriptionActivatedEvent) error {
-	// agent with less numb of users
-	agentID, err := s.store.ChooseBestAgent(ctx, input.DriverType, input.Region)
-	if err != nil {
-		return fmt.Errorf("fail upsert user storage: %w", err)
-	}
-
 	expiresAt := time.Now().Add(input.SubscribeDuration)
+
 	payload := &model.AgentUpsertPayload{
 		UserID:     input.UserID,
 		DriverType: input.DriverType,
 		ExpiresAt:  expiresAt,
 	}
 
-	if err = s.dispatcher.DispatchUpsert(ctx, agentID, input.SubscriptionID, payload); err != nil {
-		return fmt.Errorf("dispatch upsert user: %w", err)
+	var op *model.Operation
+	err := s.store.WithTx(ctx, func(ctx context.Context) error {
+		agentID, err := s.store.ChooseBestAgent(ctx, input.DriverType, input.Region) // less numb of users
+		if err != nil {
+			return fmt.Errorf("fail upsert user storage: %w", err)
+		}
+
+		err = s.store.BindSubscriptionToAgent(ctx, input.SubscriptionID, agentID)
+		if err != nil {
+			return fmt.Errorf("fail upsert subscription storage: %w", err)
+		}
+
+		op, err = s.dispatcher.DispatchUpsert(ctx, agentID, input.SubscriptionID, payload)
+		return err
+	})
+	if err != nil {
+		slog.Error("Failed to start user subscribe", "err", err)
+		return fmt.Errorf("fail start user subscribe: %w", err)
 	}
 
+	if op == nil {
+		slog.Error("Failed to start user subscribe: operation is nil")
+		return errors.New("operation is nil")
+	}
+
+	s.dispatcher.TryDispatchPrepared(ctx, op)
 	return nil
 }
 
-func (s *AgentSender) RemoveUser(ctx context.Context, input model.RemoveUserInput) error {
+func (s *AgentSender) StopUserSubscribe(ctx context.Context, input model.SubscriptionCancelEvent) error {
 	agentID, err := s.store.FindAgentIDByUserID(ctx, input.UserID)
 	if err != nil {
 		return fmt.Errorf("fail remove user storage: %w", err)
@@ -61,7 +85,7 @@ func (s *AgentSender) RemoveUser(ctx context.Context, input model.RemoveUserInpu
 		DriverType: input.DriverType,
 	}
 
-	if err = s.dispatcher.DispatchRemove(ctx, agentID, input.RequestID, rm); err != nil {
+	if err = s.dispatcher.DispatchRemove(ctx, agentID, input.SubscriptionID, rm); err != nil {
 		return fmt.Errorf("dispatch remove user: %w", err)
 	}
 

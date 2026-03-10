@@ -1,29 +1,30 @@
+-- +goose Up
 CREATE TABLE IF NOT EXISTS users (
-     id TEXT PRIMARY KEY,
-     username TEXT NOT NULL UNIQUE
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE
 );
 
 CREATE TABLE IF NOT EXISTS plans (
-     id TEXT PRIMARY KEY,
-     name TEXT NOT NULL,
-     region TEXT NOT NULL,
-     protocol TEXT NOT NULL,
-     money_amount BIGINT NOT NULL,
-     money_currency TEXT NOT NULL,
-     duration_days BIGINT NOT NULL,
-     archived BOOLEAN NOT NULL DEFAULT FALSE
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    region TEXT NOT NULL,
+    protocol TEXT NOT NULL,
+    money_amount BIGINT NOT NULL,
+    money_currency TEXT NOT NULL,
+    duration_days BIGINT NOT NULL,
+    archived BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 CREATE TABLE IF NOT EXISTS payment_methods (
-   id TEXT PRIMARY KEY,
-   name TEXT NOT NULL
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS invoices (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id),
     plan_id TEXT NOT NULL REFERENCES plans(id),
-    chat_id TEXT NOT NULL,
+    chat_id BIGINT NOT NULL,
     payment_provider TEXT NOT NULL,
     money_amount BIGINT NOT NULL,
     money_currency TEXT NOT NULL,
@@ -37,3 +38,9 @@ CREATE TABLE IF NOT EXISTS invoices (
 CREATE INDEX IF NOT EXISTS idx_invoices_user_id ON invoices(user_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_plan_id ON invoices(plan_id);
 CREATE INDEX IF NOT EXISTS idx_plans_archived ON plans(archived);
+
+-- +goose Down
+DROP TABLE IF EXISTS invoices;
+DROP TABLE IF EXISTS payment_methods;
+DROP TABLE IF EXISTS plans;
+DROP TABLE IF EXISTS users;

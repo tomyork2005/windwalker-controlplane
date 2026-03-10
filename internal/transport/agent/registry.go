@@ -21,18 +21,18 @@ type session struct {
 	cancel context.CancelFunc
 }
 
-type registry struct {
+type Hub struct {
 	mu   sync.RWMutex
 	byID map[string]*session
 }
 
-func newRegistry() *registry {
-	return &registry{
+func NewHub() *Hub {
+	return &Hub{
 		byID: make(map[string]*session),
 	}
 }
 
-func (r *registry) addAgentOrSwap(s *session) *session {
+func (r *Hub) addAgentOrSwap(s *session) *session {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -41,20 +41,20 @@ func (r *registry) addAgentOrSwap(s *session) *session {
 	return old
 }
 
-func (r *registry) remove(agentID string) {
+func (r *Hub) remove(agentID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.byID, agentID)
 }
 
-func (r *registry) get(agentID string) (*session, bool) {
+func (r *Hub) get(agentID string) (*session, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	s, ok := r.byID[agentID]
 	return s, ok
 }
 
-func (r *registry) trySend(op model.Operation) error {
+func (r *Hub) TrySend(op model.Operation) error {
 	s, ok := r.get(op.AgentID)
 	if !ok {
 		return errors.New("agent not found")

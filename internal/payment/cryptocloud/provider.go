@@ -6,9 +6,10 @@ import (
 	"control-plane/internal/config"
 	"control-plane/internal/payment"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
+	"log/slog"
+	"math"
 	"net/http"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+const rubToUsdRateMvp = 60.0
 const providerName = "CryptoCloud"
 
 type Provider struct {
@@ -49,14 +51,18 @@ func (p *Provider) Methods() []string {
 func (p *Provider) CreatePaymentOrder(ctx context.Context, input model.CreateOrderInput) (model.CreateOrderOutput, error) {
 	var out model.CreateOrderOutput
 
-	if input.Money.Curr != model.USDCurrency {
-		return out, errors.New("for crypto payment method currency must be USD")
+	amountUSD, err := convertToUSD(input.Money)
+	if err != nil {
+		return out, err
 	}
 
-	amount := float64(input.Money.Amount) / 100 // cents 100 -> $1.00
+	/*	if input.Money.Curr != model.USDCurrency {
+		return out, errors.New("for crypto payment method currency must be USD")
+	}*/
+
 	params := map[string]any{
 		"shop_id":  p.cfg.ShopID,
-		"amount":   amount,
+		"amount":   amountUSD,
 		"currency": string(model.USDCurrency),
 		"order_id": input.InvoiceID,
 		"email":    p.cfg.DefaultEmail,
@@ -96,7 +102,8 @@ func (p *Provider) CreatePaymentOrder(ctx context.Context, input model.CreateOrd
 
 	var response invoiceCreateResponse
 	if err := json.Unmarshal(raw, &response); err != nil {
-		return out, fmt.Errorf("cryptocloud: decode json: %w", err)
+		slog.Error("cryptocloud: unmarshalling response: %w", err, "response", string(raw))
+		return out, fmt.Errorf("cryptocloud: resp decode json: %w", err)
 	}
 
 	if response.Status != "success" {
@@ -193,4 +200,26 @@ func mapStatus(status string) model.InvoiceStatus {
 	default:
 		return model.UnknownInvoiceStatus
 	}
+}
+
+func convertToUSD(m model.Money) (float64, error) {
+	switch m.Curr {
+	case model.USDCurrency:
+		// amount хранится в центах -> переводим в доллары
+		usd := float64(m.Amount) / 100
+		return round2(usd), nil
+
+	case model.RUBCurrency:
+		// amount хранится в копейках
+		rub := float64(m.Amount) / 100
+		usd := rub / rubToUsdRateMvp
+		return round2(usd), nil
+
+	default:
+		return 0, fmt.Errorf("cryptocloud: unsupported currency %q", m.Curr)
+	}
+}
+
+func round2(v float64) float64 {
+	return math.Round(v*100) / 100
 }

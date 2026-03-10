@@ -26,7 +26,7 @@ type Payments struct {
 	methodToProviderMap map[string]Provider
 }
 
-func NewPayment(providers ...Provider) *Payments {
+func NewPayments(providers ...Provider) *Payments {
 	providersMap := make(map[string]Provider, len(providers))
 	methodToProviderMap := make(map[string]Provider, len(providers))
 

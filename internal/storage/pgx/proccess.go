@@ -91,18 +91,12 @@ func (s *Storage) CreateSubscription(ctx context.Context, sub *model.Subscriptio
 			plan_id,
 			status,
 			start_at,
-			end_at,
-			canceled_at
+			end_at
 		)
 		VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8
+			$1, $2, $3, $4, $5, $6, $7
 		)
 	`
-
-	var canceledAt any
-	if !sub.CanceledAt.IsZero() {
-		canceledAt = sub.CanceledAt
-	}
 
 	_, err := s.getExecutor(ctx).Exec(
 		ctx,
@@ -114,7 +108,6 @@ func (s *Storage) CreateSubscription(ctx context.Context, sub *model.Subscriptio
 		string(sub.Status),
 		sub.StartAt,
 		sub.EndAt,
-		canceledAt,
 	)
 	if err != nil {
 		return fmt.Errorf("create subscription: %w", err)

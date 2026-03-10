@@ -130,21 +130,39 @@ func (s *Storage) CreateInvoice(ctx context.Context, invoice *model.Invoice) err
 	}
 
 	const query = `
-	INSERT INTO invoices (id, user_id, plan_id, payment_provider, amount, currency, status, checkout_url, expires_at)
-	values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
+		INSERT INTO invoices (
+			id,
+			user_id,
+			plan_id,
+			chat_id,
+			payment_provider,
+			money_amount,
+			money_currency,
+			status,
+			checkout_url,
+			created_at,
+			expires_at
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+	`
 
-	_, err := s.getExecutor(ctx).Exec(ctx, query,
+	_, err := s.getExecutor(ctx).Exec(
+		ctx,
+		query,
 		invoice.ID,
 		invoice.UserID,
 		invoice.PlanID,
+		invoice.ChatID,
 		invoice.PaymentProvider,
 		invoice.Money.Amount,
 		invoice.Money.Curr,
 		invoice.Status,
 		invoice.CheckoutURL,
-		invoice.ExpiresAt.String())
+		invoice.CreatedAt,
+		invoice.ExpiresAt,
+	)
 	if err != nil {
-		return err
+		return fmt.Errorf("create invoice: %w", err)
 	}
 
 	return nil

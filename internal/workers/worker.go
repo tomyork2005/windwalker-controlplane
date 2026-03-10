@@ -21,7 +21,7 @@ type Storage interface {
 
 type AgentSubscribeService interface {
 	StartUserSubscribe(ctx context.Context, input model.SubscriptionActivatedEvent) error
-	HandleSubscriptionCancelled(ctx context.Context, event model.SubscriptionCancelEvent) error
+	StopUserSubscribe(ctx context.Context, input model.SubscriptionCancelEvent) error
 }
 
 type Worker struct {
@@ -87,7 +87,7 @@ func (w *Worker) resolveEvent(ctx context.Context, event model.OutboxEvent) erro
 		if err := json.Unmarshal(event.Payload, &cancel); err != nil {
 			return err
 		}
-		return w.service.HandleSubscriptionCancelled(ctx, cancel)
+		return w.service.StopUserSubscribe(ctx, cancel)
 
 	default:
 		return fmt.Errorf("unknown event type: %s", event.EventType)

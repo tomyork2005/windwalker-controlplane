@@ -3,6 +3,9 @@ package bot
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"net/http"
+	"strings"
 	"time"
 
 	"control-plane/internal/config"
@@ -15,7 +18,7 @@ import (
 type ShopService interface {
 	ListPlans(ctx context.Context) ([]*model.Plan, error)
 	ListPaymentMethods(ctx context.Context) ([]*model.PaymentMethod, error)
-	CreateInvoice(ctx context.Context, planID, username, methodID, chatID string) (*model.Invoice, error)
+	CreateInvoice(ctx context.Context, planID string, username string, methodID string, chatID int64) (*model.Invoice, error)
 }
 
 type action string
@@ -40,16 +43,17 @@ var cbRouter = map[action]func(*Bot, tele.Context, string) error{
 }
 
 type Bot struct {
-	cfg    config.TelegramConfig
-	svc    ShopService
-	bot    *tele.Bot
-	state  *SafeState
-	appCtx context.Context
+	cfg     config.TelegramConfig
+	svc     ShopService
+	bot     *tele.Bot
+	state   *SafeState
+	webhook *tele.Webhook
+	appCtx  context.Context
 }
 
 func NewBot(ctx context.Context, config config.TelegramConfig, service ShopService) (*Bot, error) {
 	hook := &tele.Webhook{
-		Listen:         config.Port,
+		Listen:         "",
 		Endpoint:       &tele.WebhookEndpoint{PublicURL: config.WebhookPublicURL + "/tg/webhook"},
 		SecretToken:    config.WebhookSecret,
 		MaxConnections: 40,
@@ -64,18 +68,22 @@ func NewBot(ctx context.Context, config config.TelegramConfig, service ShopServi
 	}
 
 	bot := &Bot{
-		cfg:    config,
-		svc:    service,
-		bot:    tb,
-		state:  NewSafeState(),
-		appCtx: ctx,
+		cfg:     config,
+		svc:     service,
+		bot:     tb,
+		webhook: hook,
+		state:   NewSafeState(),
+		appCtx:  ctx,
 	}
 	bot.registerHandlers()
 	return bot, nil
 }
 
+func (b *Bot) WebhookHandler() http.Handler {
+	return b.webhook
+}
+
 func (b *Bot) registerHandlers() {
-	b.bot.Use(middleware.Logger())
 	b.bot.Use(middleware.AutoRespond())
 
 	var mainMenu tele.ReplyMarkup
@@ -95,12 +103,22 @@ func (b *Bot) registerHandlers() {
 	})
 
 	b.bot.Handle(tele.OnCallback, func(c tele.Context) error {
-		a := action(c.Callback().Unique)
-		data := c.Callback().Data
+		cb := c.Callback()
+		slog.Info("callback received",
+			"unique", cb.Unique,
+			"data", cb.Data,
+			"text", cb.Message.Text,
+			"sender_id", c.Sender().ID,
+		)
+
+		a, payload := parseCallback(cb.Data)
 		if handler, ok := cbRouter[a]; ok {
-			return handler(b, c, data)
+			return handler(b, c, payload)
 		}
-		return nil
+
+		return c.Respond(&tele.CallbackResponse{
+			Text: "Неизвестная кнопка",
+		})
 	})
 }
 
@@ -111,6 +129,8 @@ func (b *Bot) onMenuProfile(c tele.Context, _ string) error {
 func (b *Bot) onMenuBuy(c tele.Context, _ string) error {
 	ctx, cancel := context.WithTimeout(b.appCtx, 5*time.Second)
 	defer cancel()
+
+	slog.Info("PressBuyButton", "username", c.Callback().Sender.Username, "chat_id", c.Chat().ID)
 
 	plans, err := b.svc.ListPlans(ctx)
 	if err != nil {
@@ -196,6 +216,11 @@ func (b *Bot) onPickDuration(c tele.Context, planID string) error {
 	ctx, cancel := context.WithTimeout(b.appCtx, 5*time.Second)
 	defer cancel()
 
+	plans, ok := b.state.GetActualPlans(c.Sender().ID)
+	if !ok {
+		return c.Edit("Сессия истекла. Начните заново: /menu")
+	}
+
 	methods, err := b.svc.ListPaymentMethods(ctx)
 	if err != nil {
 		return c.Send("Не удалось загрузить методы, попробуйте позже 🙏")
@@ -205,6 +230,15 @@ func (b *Bot) onPickDuration(c tele.Context, planID string) error {
 	if !ok || st.Region == "" || st.Protocol == "" {
 		return c.Edit("Сессия истекла. Начните заново: /menu")
 	}
+
+	if planID == "__back__" {
+		buttons := buildDurationBtns(plans, st.Region, st.Protocol)
+		if buttons == nil {
+			return c.Edit("Для выбранного региона и протокола тарифов нет.")
+		}
+		return c.Edit("Выберите длительность подписки:", buttons)
+	}
+
 	buttons := buildPaymentMethodBtns(methods, planID)
 	return c.Edit("Выберите способ оплаты:", buttons)
 }
@@ -222,7 +256,7 @@ func (b *Bot) onPickPaymentMethod(c tele.Context, payload string) error {
 		username = fmt.Sprintf("tg_%d", c.Sender().ID)
 	}
 
-	inv, err := b.svc.CreateInvoice(ctx, planID, username, methodID, fmt.Sprintf("%d", c.Chat().ID))
+	inv, err := b.svc.CreateInvoice(ctx, planID, username, methodID, c.Chat().ID)
 	if err != nil {
 		return c.Respond(&tele.CallbackResponse{Text: "Не удалось создать счёт"})
 	}
@@ -237,4 +271,35 @@ func (b *Bot) onPickPaymentMethod(c tele.Context, payload string) error {
 		return c.Send("Счёт создан ✅", &kb)
 	}
 	return nil
+}
+
+func (b *Bot) Run(ctx context.Context) error {
+	errCh := make(chan error, 1)
+
+	go func() {
+		b.bot.Start()
+		errCh <- nil
+	}()
+
+	select {
+	case <-ctx.Done():
+		b.bot.Stop()
+		<-errCh
+		return ctx.Err()
+	case err := <-errCh:
+		return err
+	}
+}
+
+func parseCallback(data string) (action, string) {
+	data = strings.TrimPrefix(data, "\f")
+
+	parts := strings.SplitN(data, "|", 2)
+	act := action(parts[0])
+
+	if len(parts) == 2 {
+		return act, parts[1]
+	}
+
+	return act, ""
 }

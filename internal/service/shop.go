@@ -4,6 +4,7 @@ import (
 	"context"
 	"control-plane/internal/model"
 	"github.com/google/uuid"
+	"log/slog"
 	"time"
 )
 
@@ -25,14 +26,12 @@ type ShopStorage interface {
 type ShopService struct {
 	payment ShopPayment
 	storage ShopStorage
-	outbox  Outbox
 }
 
-func NewShopService(payment ShopPayment, storage ShopStorage, outbox Outbox) *ShopService {
+func NewShopService(payment ShopPayment, storage ShopStorage) *ShopService {
 	return &ShopService{
 		storage: storage,
 		payment: payment,
-		outbox:  outbox,
 	}
 }
 
@@ -54,11 +53,13 @@ func (s *ShopService) ListPlans(ctx context.Context) ([]*model.Plan, error) {
 	return plans, nil
 }
 
-func (s *ShopService) CreateInvoice(ctx context.Context, planID string, username string, methodID string, chatID string) (*model.Invoice, error) {
+func (s *ShopService) CreateInvoice(ctx context.Context, planID string, username string, methodID string, chatID int64) (*model.Invoice, error) {
 	user, err := s.storage.UpsertUser(ctx, uuid.NewString(), username)
 	if err != nil {
 		return nil, err
 	}
+
+	slog.Info("CreateInvoice user:", "planID:", planID, "methodID:", methodID, "chat_id:", chatID)
 
 	plan, err := s.storage.GetPlanByID(ctx, planID)
 	if err != nil {
@@ -72,6 +73,7 @@ func (s *ShopService) CreateInvoice(ctx context.Context, planID string, username
 		MethodID:  methodID,
 	})
 	if err != nil {
+		slog.Error("Failed to create payment order", "err", err)
 		return nil, err
 	}
 
@@ -79,6 +81,7 @@ func (s *ShopService) CreateInvoice(ctx context.Context, planID string, username
 		ID:              invoiceID,
 		UserID:          user.ID,
 		PlanID:          plan.ID,
+		ChatID:          chatID,
 		PaymentProvider: output.ProviderName,
 		Money:           plan.Money,
 		Status:          model.CreatedInvoiceStatus,

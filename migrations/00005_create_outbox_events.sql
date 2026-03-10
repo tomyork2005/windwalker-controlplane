@@ -1,4 +1,5 @@
-CREATE TABLE outbox_events (
+-- +goose Up
+CREATE TABLE IF NOT EXISTS outbox_events (
     id           uuid PRIMARY KEY,
     event_type   text        NOT NULL,
     payload      jsonb       NOT NULL,
@@ -8,8 +9,9 @@ CREATE TABLE outbox_events (
     processed_at timestamptz NULL
 );
 
-CREATE INDEX outbox_events_unprocessed_idx
+CREATE INDEX IF NOT EXISTS outbox_events_unprocessed_idx
     ON outbox_events (created_at)
     WHERE processed_at IS NULL;
 
-
+-- +goose Down
+DROP TABLE IF EXISTS outbox_events;
