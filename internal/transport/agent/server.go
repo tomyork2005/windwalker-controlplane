@@ -7,6 +7,7 @@ import (
 	"control-plane/internal/service"
 	"errors"
 	"io"
+	"log/slog"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -27,6 +28,7 @@ type Dispatcher interface {
 	RecoverPending(ctx context.Context, agentID string, fromExclusive uint64, limit int) error
 	HandleAck(ctx context.Context, agentID string, seq uint64) error
 	HandleNack(ctx context.Context, agentID string, seq uint64, errMsg string) error
+	GetRequestIDByAgentSeq(ctx context.Context, agentID string, seq uint64) (string, error)
 }
 
 type Server struct {
@@ -221,11 +223,26 @@ func (s *Server) handleResponse(ctx context.Context, agentID string, resp *contr
 	}
 
 	seq := meta.GetSeq()
+	reqID := meta.GetRequestId()
+
+	slog.Info("agent response", "agent_id", agentID, "seq", seq, "req_id", reqID)
+
+	if reqID == "" {
+		if recovered, err := s.dispatcher.GetRequestIDByAgentSeq(ctx, agentID, seq); err == nil && recovered != "" {
+			slog.Warn("agent echoed empty request_id, recovered from agent_tasks",
+				"agent_id", agentID, "seq", seq, "recovered_req_id", recovered)
+			reqID = recovered
+		} else {
+			slog.Error("agent echoed empty request_id and recovery failed",
+				"agent_id", agentID, "seq", seq, "err", err)
+		}
+	}
 
 	switch b := resp.Body.(type) {
 	case *controlpb.Response_Upsert:
-		if err := s.svc.HandleStartUserSubscribeResponse(ctx, meta.GetRequestId(), VPNCredsFromProto(b)); err != nil {
-			_ = s.dispatcher.HandleNack(ctx, agentID, seq, err.Error())
+		if err := s.svc.HandleStartUserSubscribeResponse(ctx, reqID, VPNCredsFromProto(b)); err != nil {
+			slog.Error("upsert response handling failed — task left pending for recovery",
+				"agent_id", agentID, "seq", seq, "err", err)
 			return seq, err
 		}
 		if err := s.dispatcher.HandleAck(ctx, agentID, seq); err != nil {

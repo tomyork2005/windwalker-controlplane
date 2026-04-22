@@ -93,6 +93,40 @@ func (s *Storage) ResolveChatIDBySubscribeID(ctx context.Context, subscribeID st
 	return chatID, nil
 }
 
+func (s *Storage) StoreSubscriptionCreds(ctx context.Context, subscriptionID string, creds string) error {
+	const query = `
+		UPDATE subscriptions
+		SET creds = $2, creds_ready_at = now()
+		WHERE id = $1
+	`
+
+	tag, err := s.getExecutor(ctx).Exec(ctx, query, subscriptionID, creds)
+	if err != nil {
+		return fmt.Errorf("store subscription creds: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("store subscription creds: subscription %q not found", subscriptionID)
+	}
+	return nil
+}
+
+// GetRequestIDByAgentSeq is a fallback used when an agent echoes an empty meta.request_id.
+// We can still recover the original subscription_id via the (agent_id, seq) pair.
+func (s *Storage) GetRequestIDByAgentSeq(ctx context.Context, agentID string, seq uint64) (string, error) {
+	const query = `
+		SELECT request_id
+		FROM agent_tasks
+		WHERE agent_id = $1 AND seq = $2
+		LIMIT 1
+	`
+
+	var reqID string
+	if err := pgxscan.Get(ctx, s.getExecutor(ctx), &reqID, query, agentID, seq); err != nil {
+		return "", fmt.Errorf("get request id by agent seq: %w", err)
+	}
+	return reqID, nil
+}
+
 // Sender
 
 func (s *Storage) ChooseBestAgent(ctx context.Context, driverType string, region string) (string, error) {

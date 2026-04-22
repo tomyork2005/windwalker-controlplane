@@ -19,6 +19,7 @@ type DispatchStorage interface {
 	MarkTaskAck(ctx context.Context, agentID string, seq uint64) error
 	MarkTaskNack(ctx context.Context, agentID string, seq uint64, errMsg string) error
 	IncTaskRetries(ctx context.Context, agentID string, seq uint64, errMsg string) error
+	GetRequestIDByAgentSeq(ctx context.Context, agentID string, seq uint64) (string, error)
 
 	WithTx(ctx context.Context, fn func(ctx context.Context) error) error
 }
@@ -157,6 +158,10 @@ func (d *Dispatcher) HandleAck(ctx context.Context, agentID string, seq uint64) 
 
 func (d *Dispatcher) HandleNack(ctx context.Context, agentID string, seq uint64, errMsg string) error {
 	return d.store.MarkTaskNack(ctx, agentID, seq, errMsg)
+}
+
+func (d *Dispatcher) GetRequestIDByAgentSeq(ctx context.Context, agentID string, seq uint64) (string, error) {
+	return d.store.GetRequestIDByAgentSeq(ctx, agentID, seq)
 }
 
 func (d *Dispatcher) trySend(ctx context.Context, op model.Operation) {

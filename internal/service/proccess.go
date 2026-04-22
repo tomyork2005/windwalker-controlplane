@@ -73,6 +73,11 @@ func (s *ProcessService) ProcessPaymentCallback(ctx context.Context, req model.C
 			return err
 		}
 
+		paidEvent := model.InvoicePaidNotificationEvent{ChatID: inv.ChatID}
+		if err = s.outbox.SaveOutboxEvent(ctx, model.EventTypeInvoicePaidNotification, paidEvent); err != nil {
+			return err
+		}
+
 		plan, err := s.storage.GetPlanByID(ctx, inv.PlanID)
 		if err != nil {
 			return err

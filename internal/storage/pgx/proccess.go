@@ -122,7 +122,7 @@ type invoiceRow struct {
 	ID              string     `db:"id"`
 	UserID          string     `db:"user_id"`
 	PlanID          string     `db:"plan_id"`
-	ChatID          string     `db:"chat_id"`
+	ChatID          int64      `db:"chat_id"`
 	PaymentProvider string     `db:"payment_provider"`
 	MoneyAmount     int64      `db:"money_amount"`
 	MoneyCurr       string     `db:"money_currency"`
@@ -143,6 +143,7 @@ func (r *invoiceRow) toModel() (*model.Invoice, error) {
 		ID:              r.ID,
 		UserID:          r.UserID,
 		PlanID:          r.PlanID,
+		ChatID:          r.ChatID,
 		PaymentProvider: r.PaymentProvider,
 		Money:           money,
 		Status:          model.InvoiceStatus(r.Status),

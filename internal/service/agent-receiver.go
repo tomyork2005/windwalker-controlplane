@@ -13,6 +13,10 @@ type AgentReceiverStorage interface {
 	UpsertAgent(ctx context.Context, agent *model.Agent) error
 	UpdateAgentHeartbeat(ctx context.Context, agentID string, uptime uint64, seenAt, deadline time.Time) error
 	ResolveChatIDBySubscribeID(ctx context.Context, subscribeID string) (int64, error)
+	StoreSubscriptionCreds(ctx context.Context, subscriptionID string, creds string) error
+	SaveOutboxEvent(ctx context.Context, eventType string, payload any) error
+
+	WithTx(ctx context.Context, fn func(ctx context.Context) error) error
 }
 
 type VPNCreds interface {
@@ -20,26 +24,20 @@ type VPNCreds interface {
 	ToTelegramClientOutput() string
 }
 
-type TelegramSender interface {
-	Send(ctx context.Context, chatID int64, message string) error
-}
-
 type AgentReceiver struct {
-	store  AgentReceiverStorage
-	sender TelegramSender
+	store AgentReceiverStorage
 
 	hbTTL time.Duration
 }
 
-func NewAgentReceiver(store AgentReceiverStorage, sender TelegramSender, hbTTL time.Duration) *AgentReceiver {
+func NewAgentReceiver(store AgentReceiverStorage, hbTTL time.Duration) *AgentReceiver {
 	if hbTTL <= 0 {
 		hbTTL = 60 * time.Second
 	}
 
 	return &AgentReceiver{
-		store:  store,
-		sender: sender,
-		hbTTL:  hbTTL,
+		store: store,
+		hbTTL: hbTTL,
 	}
 }
 
@@ -70,13 +68,34 @@ func (s *AgentReceiver) Heartbeat(ctx context.Context, agentID string, uptimeSec
 }
 
 func (s *AgentReceiver) HandleStartUserSubscribeResponse(ctx context.Context, subscribeID string, creds VPNCreds) error {
+	if subscribeID == "" {
+		slog.Error("Agent upsert response has empty request_id — orphan creds, cannot deliver",
+			"user_id", creds.GetUserID())
+		return nil
+	}
+
 	chatID, err := s.store.ResolveChatIDBySubscribeID(ctx, subscribeID)
 	if err != nil {
-		slog.Error("Failed to resolve chat ID", "error", err)
 		return fmt.Errorf("fail resolve chat id: %w", err)
 	}
 
-	return s.sender.Send(ctx, chatID, creds.ToTelegramClientOutput())
+	message := creds.ToTelegramClientOutput()
+
+	return s.store.WithTx(ctx, func(ctx context.Context) error {
+		if err := s.store.StoreSubscriptionCreds(ctx, subscribeID, message); err != nil {
+			return fmt.Errorf("fail store subscription creds: %w", err)
+		}
+
+		event := model.CredsDeliveryEvent{
+			SubscriptionID: subscribeID,
+			ChatID:         chatID,
+			Message:        message,
+		}
+		if err := s.store.SaveOutboxEvent(ctx, model.EventTypeCredsDelivery, event); err != nil {
+			return fmt.Errorf("fail save creds delivery event: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *AgentReceiver) HandleRemoveCallback(_ context.Context) error {

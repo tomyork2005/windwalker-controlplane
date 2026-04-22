@@ -57,7 +57,7 @@ func main() {
 	hub := agent.NewHub()
 	dispatcher := service.NewDispatcher(storage, hub)
 
-	agentReceiver := service.NewAgentReceiver(storage, bot, time.Minute*time.Duration(cfg.HeartbeatIntervalMinutes))
+	agentReceiver := service.NewAgentReceiver(storage, time.Minute*time.Duration(cfg.HeartbeatIntervalMinutes))
 	agentSender := service.NewAgentSender(storage, dispatcher)
 
 	grpcServer := grpc.NewServer()
@@ -66,7 +66,7 @@ func main() {
 		agent.NewServer(agentReceiver, dispatcher, hub, time.Minute*time.Duration(cfg.HeartbeatIntervalMinutes)),
 	)
 
-	worker := workers.NewWorker(storage, agentSender)
+	worker := workers.NewWorker(storage, agentSender, bot)
 
 	root := chi.NewRouter()
 	root.Use(middleware.Logger)

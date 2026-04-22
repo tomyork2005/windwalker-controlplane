@@ -1,76 +1,109 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Этот файл содержит инструкции для Claude Code (claude.ai/code) при работе с этим репозиторием.
 
-## Commands
+## Команды
 
-Run / build / check — from the repo root:
+Запуск / сборка / проверка — из корня репо:
 
 ```bash
-# Run the service (CONFIG_PATH is REQUIRED — MustLoadConfig hard-fails without it)
+# Запуск сервиса (CONFIG_PATH обязателен — MustLoadConfig паникует без него)
 CONFIG_PATH=config/config.yaml go run ./cmd
 
 go build ./...
 go vet ./...
-go test ./...                           # run all tests
-go test ./internal/service/... -run TestX  # single package / single test
+go test ./...                              # все тесты
+go test ./internal/service/... -run TestX  # один пакет / один тест
 ```
 
-Migrations use **goose** format (`-- +goose Up` / `-- +goose Down` markers in `migrations/*.sql`) — apply with:
+Миграции в формате **goose** (маркеры `-- +goose Up` / `-- +goose Down` в `migrations/*.sql`). Локально применяются так:
 
 ```bash
 goose -dir migrations postgres "postgres://postgres:postgres@127.0.0.1:5433/control_plane?sslmode=disable" up
 ```
 
-Proto changes: `api/control/control.proto` is the source; `control.pb.go` and `control_grpc.pb.go` are generated (regenerate via `protoc --go_out --go-grpc_out` with go_package `control/api/control;controlpb`).
+В docker-compose миграции применяются автоматически сервисом `migrate` (см. `docker-compose.yml`, стейдж `migrate` в `Dockerfile`), который ждёт healthy `postgres` и выполняет `goose up`.
 
-## Architecture
+Правки `.proto`: `api/control/control.proto` — источник; `control.pb.go` и `control_grpc.pb.go` сгенерированы (регенерировать через `protoc --go_out --go-grpc_out`, `go_package = control/api/control;controlpb`).
 
-This is a VPN **control plane**: a Telegram shop + payment processor that provisions VPN credentials by dispatching commands to remote **agents** over a bidirectional gRPC stream. A single `cmd/main.go` binary wires up four concurrent servers via `errgroup`: HTTP (chi), gRPC, Telegram webhook, and an outbox worker.
+## Деплой
 
-### End-to-end flow
+Однокнопочный деплой на VPS (Ubuntu, docker установлен через `get.docker.com`):
 
-1. **Telegram bot** (`internal/transport/telegram-bot`) drives the purchase flow: user picks region → protocol → duration → payment method. `ShopService.CreateInvoice` calls `Payments.CreatePaymentOrder` (routed by `methodID` to a `payment.Provider` impl, e.g. `cryptocloud`), persists an `Invoice` with status `created`, and returns a checkout URL.
-2. **Provider webhook** (HTTP, `internal/transport/handler`) receives payment callback → `ProcessService.ProcessPaymentCallback`:
-   - `VerifyCallback` on the `Payments` facade
-   - Inside `WithTx`: `SELECT … FOR UPDATE` the invoice, mark `success`, create `Subscription`, write a `SubscriptionActivatedEvent` to `outbox_events` (**transactional outbox**).
-3. **Outbox worker** (`internal/workers`) polls `outbox_events` every 3s in batches of 5 (max 10 attempts). For `subscription_activated` it invokes `AgentSender.StartUserSubscribe`, which — inside a tx — calls `ChooseBestAgent` (region + driver_type, least-loaded), `BindSubscriptionToAgent`, then `Dispatcher.DispatchUpsert`. After commit it calls `TryDispatchPrepared` to push immediately.
-4. **Dispatcher** (`internal/service/dispatcher.go`) is the durable command pipe. `EnqueueTask` writes to `agent_tasks` with a monotonic `seq` from `NextSeq` (backed by `agent_seq` table — note this table is **not in migrations/**, it must exist out-of-band). `TrySend` is non-blocking over the agent's in-memory `sendCh`; failure marks retries but the row stays pending.
-5. **Agent gRPC Workstream** (`internal/transport/agent/server.go`):
-   - Agent opens bidi stream, first frame **must** be `AgentHello` → `RegisterAgent` → creates a `session` in `Hub` (swapping out any stale session for the same `agent_id`).
-   - Server replies `Welcome`, then `flushPending` kicks off: `RecoverPending` fetches unacked `agent_tasks` from `lastSeq`, sends them in order, marks `sent_at`.
-   - Client responses update `agent_tasks` via `HandleAck` / `HandleNack`. Heartbeats reset a per-stream `hbTimer`; missing heartbeat → stream closes with `DeadlineExceeded`.
-   - On `HandleStartUserSubscribeResponse` (upsert reply with creds), credentials are sent to the user via `TelegramSender` using `ResolveChatIDBySubscribeID`.
+```bash
+git clone <repo> && cd <dir>
+cp .env.example .env                 # отредактировать ACME_EMAIL / postgres creds
+./deploy.sh                          # git pull + docker compose build + up -d
+```
 
-### Idempotency & ordering contract
+Стек compose:
+- **postgres** — Postgres 16, volume `pgdata`, забинден на `127.0.0.1:5432` (наружу не виден; подключаться к БД из GoLand — через SSH-туннель на VPS).
+- **migrate** — one-shot goose, ждёт healthy postgres.
+- **control-plane** — Go-бинарь на distroless, публикует `:50051` (gRPC для агентов), `:8081` только во внутренней сети.
+- **caddy** — авто-TLS Let's Encrypt на домен из `Caddyfile`, `:80` и `:443` наружу, реверс-прокси на `control-plane:8081`.
 
-- `request_id` (= `subscription_id` for subscribe flows) = **business** idempotency key.
-- `(agent_id, seq)` uniquely identifies a transport operation; the agent is expected to process strictly in-order and ack by `seq`.
-- Same `(agent_id, seq)` may be re-sent after agent reconnect — agent must be idempotent by `(request_id, seq)`.
-- Invoice webhook is idempotent via `status == SuccessInvoiceStatus` short-circuit.
+Домен задаётся в `Caddyfile`. Telegram webhook: `POST https://<домен>/tg/webhook`. CryptoCloud callback: `POST https://<домен>/api/control/payment/cryptocloud/webhook`.
 
-### Transaction propagation
+## Архитектура
 
-`pgx.TxManager.WithTx` stashes the `pgx.Tx` in `context.Context`; every storage method calls `s.getExecutor(ctx)` which returns the tx if present, else the pool. **Always call storage methods with the tx-bearing ctx** inside `WithTx` callbacks — never the outer ctx, or you'll silently split a logical transaction. Nested `WithTx` reuses the existing tx (no savepoints).
+Это **control plane** для VPN-сервиса: Telegram-магазин + payment processor, который выдаёт VPN-подключения, отправляя команды **агентам** через bidi-gRPC-стрим. Один бинарь `cmd/main.go` поднимает четыре сервера через `errgroup`: HTTP (chi), gRPC, Telegram webhook и outbox-воркер.
 
-### Layering
+### Сквозной поток
 
-- `cmd/main.go` — composition root; all wiring lives here, not in package inits.
-- `internal/model` — pure domain types + JSON payloads for outbox / task rows. No I/O, no framework deps.
-- `internal/service` — use-cases. Each service defines **its own narrow storage / collaborator interfaces** right above the struct — the concrete `pgx.Storage` happens to satisfy all of them. When adding a service method, extend the matching interface in the consumer package, not a central one.
-- `internal/storage/pgx` — pgx implementations. Uses `scany` for row scanning. `db:` struct tags on model types drive scanning.
-- `internal/transport/{agent,handler,telegram-bot}` — gRPC, HTTP, Telegram adapters. Converters (proto ↔ model) live next to the transport, not in `model`.
-- `internal/payment` — provider registry keyed by both provider name (for webhook routing) and method id (for order creation). Add a provider by implementing `payment.Provider` and passing it to `NewPayments(...)` in `main.go`.
-- `internal/workers` — outbox dispatcher loop. New event types: add a const in `model/outbox.go`, a payload type, a case in `Worker.resolveEvent`.
-- `api/control` — protobuf contract with agents. `go_package` is `control/api/control;controlpb`.
+1. **Telegram-бот** (`internal/transport/telegram-bot`) ведёт воронку покупки: регион → протокол → срок → метод оплаты. `ShopService.CreateInvoice` вызывает `Payments.CreatePaymentOrder` (роутится по `methodID` в конкретный `payment.Provider`, например `cryptocloud`), сохраняет `Invoice` со статусом `created` и возвращает checkout-URL.
+2. **Webhook провайдера** (HTTP, `internal/transport/handler`) принимает колбэк платежа → `ProcessService.ProcessPaymentCallback`:
+   - `VerifyCallback` на фасаде `Payments`
+   - Внутри `WithTx`: `SELECT … FOR UPDATE` по инвойсу, ставим `success`, сохраняем событие `EventTypeInvoicePaidNotification` в outbox (уведомление «счёт оплачен, ждите»), создаём `Subscription`, пишем `SubscriptionActivatedEvent` в `outbox_events` (**транзакционный outbox**).
+3. **Outbox worker** (`internal/workers`) опрашивает `outbox_events` раз в 3 секунды батчами по 5 (лимит попыток — 10). Обрабатывает пять типов событий:
+   - `subscription_activated` → `AgentSender.StartUserSubscribe` (выбор агента + dispatch upsert)
+   - `subscription_cancelled` → `AgentSender.StopUserSubscribe`
+   - `invoice_paid_notification` → отправка TG-сообщения юзеру через `TelegramSender`
+   - `creds_delivery` → отправка готового `vless://…` (payload события уже содержит `chat_id` и `message` — второй DB-лукап не нужен)
+   - `delivery_failed_notification` → «не получилось, напиши в поддержку», рождается воркером при исчерпании ретраев у `creds_delivery`
+4. **AgentSender.StartUserSubscribe** — внутри tx: `ChooseBestAgent` (регион + driver_type, least-loaded), `BindSubscriptionToAgent`, `Dispatcher.DispatchUpsert`. После коммита — `TryDispatchPrepared` пушит таску сразу.
+5. **Dispatcher** (`internal/service/dispatcher.go`) — durable pipe команд. `EnqueueTask` пишет в `agent_tasks` с монотонным `seq` из `NextSeq` (бэкенд — таблица `agent_seq`, миграция `00006`). `TrySend` — non-blocking через `sendCh` сессии; фейл инкрементит retries, но строка остаётся pending.
+6. **Agent gRPC Workstream** (`internal/transport/agent/server.go`):
+   - Агент открывает bidi-стрим, первый фрейм **обязан** быть `AgentHello` → `RegisterAgent` → создаёт `session` в `Hub` (вытесняя stale-сессию с тем же `agent_id`).
+   - Сервер отвечает `Welcome`, затем `flushPending` запускает `RecoverPending`: забирает неотаканные `agent_tasks` с `lastSeq`, шлёт по порядку, маркирует `sent_at`.
+   - Ответы клиента обновляют `agent_tasks` через `HandleAck` / `HandleNack`. Heartbeats сбрасывают per-stream `hbTimer`; пропуск heartbeat → стрим закрывается с `DeadlineExceeded`.
+   - На `HandleStartUserSubscribeResponse` (upsert с кредами): CP **сохраняет креды в `subscriptions.creds`**, пишет `creds_delivery` в outbox, **всегда Ack'ает** таску агента. Доставка пользователю — асинхронно через воркер (не блокирует агента).
+   - Если `meta.request_id` в ответе пустой — fallback через `GetRequestIDByAgentSeq(agent_id, seq)` поднимает реальный `subscription_id` из `agent_tasks`.
 
-### Config
+### Контракт идемпотентности и порядка
 
-`internal/config` uses `cleanenv` with YAML + env overrides. `CONFIG_PATH` env var is **required** — absent/missing file = `log.Fatal`. The repo's `config/config.yaml` is gitignored in spirit (note `.gitignore` has `./config/config.yaml` but the file is currently committed with real-looking secrets — treat it as a local dev template; don't commit real credentials).
+- `request_id` (= `subscription_id` для subscribe-флоу) = **бизнесовый** ключ идемпотентности.
+- `(agent_id, seq)` однозначно идентифицирует транспортную операцию; агент обязан обрабатывать строго по порядку и ack'ать по `seq`.
+- Один и тот же `(agent_id, seq)` может быть переотправлен после реконнекта агента — агент должен быть идемпотентен по `(request_id, seq)`.
+- Webhook инвойса идемпотентен через short-circuit `status == SuccessInvoiceStatus`.
+- **Доставка кредов отвязана от работы агента**: CP-side ошибка при обработке ответа (DB-недоступна, TG упал и т.п.) **не** ведёт к Nack'у таски. Таска остаётся `done_at IS NULL` и подхватится `RecoverPending` при реконнекте. Доставка пользователю ретраится внутри outbox-воркера.
 
-## Known rough edges (don't "fix" unless asked)
+### Распространение транзакций
 
-- `Agent.Validate()` is a no-op stub.
-- Several `HandleRemoveCallback` / `HandleStatsAll` / `HandleError` methods return `"not implemented yet"`.
-- `freekassa` payment provider exists but is not wired in `main.go`.
-- HTTP `http.port` and telegram `telegram.port` both default to `:8081` in the sample config — telegram's `port` field is unused at runtime (webhook is mounted on the chi router at `/tg/webhook`).
+`pgx.TxManager.WithTx` прячет `pgx.Tx` в `context.Context`; каждый storage-метод вызывает `s.getExecutor(ctx)` — возвращает tx если есть, иначе пул. **Всегда вызывай storage-методы с tx-ctx** внутри колбэков `WithTx` — иначе молча распадёшь логическую транзакцию. Вложенные `WithTx` переиспользуют текущую tx (без savepoints).
+
+### Слои
+
+- `cmd/main.go` — composition root; вся проводка тут, не в пакетных init'ах.
+- `internal/model` — чистые доменные типы + JSON-payload'ы для outbox / agent_tasks. Без I/O, без фреймворков.
+- `internal/service` — use-cases. Каждый сервис определяет **свои узкие storage/collaborator-интерфейсы** прямо над структурой — конкретный `pgx.Storage` их все удовлетворяет. Добавляя метод сервиса, расширяй интерфейс у консьюмера, не в центральном месте.
+- `internal/storage/pgx` — реализации на pgx. Используется `scany` для скана строк. `db:`-теги на моделях рулят сканом.
+- `internal/transport/{agent,handler,telegram-bot}` — адаптеры gRPC, HTTP, Telegram. Конвертеры (proto ↔ model) живут рядом с транспортом, не в `model`.
+- `internal/payment` — реестр провайдеров, ключ — и имя провайдера (для роутинга webhook'ов), и id метода (для создания заказа). Новый провайдер = реализовать `payment.Provider` и передать в `NewPayments(...)` в `main.go`.
+- `internal/workers` — outbox-воркер. Новый тип события: добавь константу в `model/outbox.go`, payload-тип, case в `Worker.resolveEvent`. При необходимости ретрай-эскалаций — пример в `maybeEscalate` (creds_delivery → delivery_failed_notification).
+- `api/control` — protobuf-контракт с агентами. `go_package = control/api/control;controlpb`.
+
+### Конфиг
+
+`internal/config` использует `cleanenv` (YAML + env-оверрайды). Переменная `CONFIG_PATH` **обязательна** — отсутствующий/невалидный файл = `log.Fatal`. В репозитории два YAML:
+- `config/config.yaml` — для локального запуска (`127.0.0.1:5433` в DSN).
+- `config/config.docker.yaml` — для docker-compose (`postgres:5432` в DSN, `webhook_public_url` боевой домен). Именно он монтируется в `control-plane`-контейнер как `/app/config.yaml`.
+
+Оба файла закоммичены с реальными секретами — репа приватная, пользователь осознанно так хранит. Не ругай, просто не распространяй дальше.
+
+## Известные шероховатости (не «чинить», пока не попросили)
+
+- `Agent.Validate()` — no-op-заглушка.
+- `HandleRemoveCallback` / `HandleStatsAll` / `HandleError` возвращают `"not implemented yet"`.
+- Провайдер `freekassa` реализован, но не подключён в `main.go`.
+- В дефолтном конфиге `http.port` и `telegram.port` оба равны `:8081` — поле `telegram.port` в рантайме не используется (webhook примонтирован на chi-роутере по `/tg/webhook`).
+- `cryptocloud/provider.go:105` — `go vet` ругается на формат slog (`%w` в сообщении вместо key/value). Претензия справедливая, но правка не в скоупе.

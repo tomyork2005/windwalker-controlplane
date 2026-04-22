@@ -3,8 +3,11 @@ package model
 import "time"
 
 const (
-	EventTypeSubscriptionActivated = "subscription_activated"
-	EventTypeSubscriptionCancelled = "subscription_cancelled"
+	EventTypeSubscriptionActivated      = "subscription_activated"
+	EventTypeSubscriptionCancelled      = "subscription_cancelled"
+	EventTypeInvoicePaidNotification    = "invoice_paid_notification"
+	EventTypeCredsDelivery              = "creds_delivery"
+	EventTypeDeliveryFailedNotification = "delivery_failed_notification"
 )
 
 type SubscriptionActivatedEvent struct {
@@ -21,6 +24,21 @@ type SubscriptionCancelEvent struct {
 	DriverType string `json:"driver_type"`
 
 	SubscriptionID string `json:"subscription_id"`
+}
+
+type InvoicePaidNotificationEvent struct {
+	ChatID int64 `json:"chat_id"`
+}
+
+type CredsDeliveryEvent struct {
+	SubscriptionID string `json:"subscription_id"`
+	ChatID         int64  `json:"chat_id"`
+	Message        string `json:"message"`
+}
+
+type DeliveryFailedNotificationEvent struct {
+	SubscriptionID string `json:"subscription_id"`
+	ChatID         int64  `json:"chat_id"`
 }
 
 type OutboxEvent struct {
