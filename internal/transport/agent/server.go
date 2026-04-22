@@ -6,10 +6,11 @@ import (
 	"control-plane/internal/model"
 	"control-plane/internal/service"
 	"errors"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"io"
 	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type Service interface {
@@ -69,7 +70,7 @@ func (s *Server) Workstream(stream controlpb.ControlPlane_WorkstreamServer) erro
 	agent := agentFromHelloPb(hello)
 	err = s.svc.RegisterAgent(ctx, agent)
 	if err != nil {
-		// todo route errors
+		return status.Errorf(codes.Internal, "register agent: %v", err)
 	}
 
 	agentSession := newSessionFromAgent(ctx, agent)
@@ -123,6 +124,9 @@ func (s *Server) Workstream(stream controlpb.ControlPlane_WorkstreamServer) erro
 
 		case recvErr := <-recvErrCh:
 			return s.finishStream(agentSession, sendErrCh, normalizeRecvErr(recvErr))
+
+		case sendErr := <-sendErrCh:
+			return s.finishStream(agentSession, nil, sendErr)
 
 		case <-hbTimer.C:
 			return s.finishStream(agentSession, sendErrCh, status.Error(codes.DeadlineExceeded, "heartbeat timeout"))

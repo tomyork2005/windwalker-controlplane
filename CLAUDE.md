@@ -70,7 +70,6 @@ This is a VPN **control plane**: a Telegram shop + payment processor that provis
 
 ## Known rough edges (don't "fix" unless asked)
 
-- `agent_seq` table is referenced by `NextSeq` but has no migration file.
 - `Agent.Validate()` is a no-op stub.
 - Several `HandleRemoveCallback` / `HandleStatsAll` / `HandleError` methods return `"not implemented yet"`.
 - `freekassa` payment provider exists but is not wired in `main.go`.

@@ -42,6 +42,10 @@ func (o *Operation) Validate() error {
 	if o.AgentID == "" {
 		return fmt.Errorf("agent_id is required")
 	}
+	if o.Kind == OpHello {
+		return nil
+	}
+
 	if o.RequestID == "" {
 		return fmt.Errorf("request_id is required")
 	}

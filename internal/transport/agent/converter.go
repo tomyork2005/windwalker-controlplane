@@ -5,19 +5,23 @@ import (
 	"control-plane/internal/model"
 	"control-plane/internal/service"
 	"fmt"
+
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func agentFromHelloPb(hello *controlpb.AgentHello) *model.Agent {
+	id := hello.GetAgentId()
+	if id == "" {
+		id = hello.GetInstanceId()
+	}
 	return &model.Agent{
-		ID:          hello.GetAgentId(),
+		ID:          id,
 		InstanceID:  hello.GetInstanceId(),
 		Region:      hello.GetRegion(),
 		Version:     hello.GetVersion(),
 		DriverTypes: hello.GetDriverTypes(),
 	}
 }
-
 func operationToProto(o model.Operation) (*controlpb.ControlToAgent, error) {
 	if err := o.Validate(); err != nil {
 		return nil, fmt.Errorf("operation validate: %w", err)
