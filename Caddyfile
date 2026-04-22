@@ -1,0 +1,19 @@
+{
+	email {$ACME_EMAIL}
+}
+
+himura.tech {
+	encode zstd gzip
+
+	reverse_proxy control-plane:8081 {
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

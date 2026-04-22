@@ -1,0 +1,13 @@
+.git
+.gitignore
+.idea
+.claude
+*.iml
+CLAUDE.md
+README.md
+deploy.sh
+docker-compose.yml
+Dockerfile
+Caddyfile
+.env
+.env.example

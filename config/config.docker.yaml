@@ -1,0 +1,27 @@
+postgres:
+  connection_string: "postgres://postgres:postgres@postgres:5432/control_plane?sslmode=disable"
+
+telegram:
+  bot_token: "8432960541:AAHs5udZjU3bdSmbK0tiZLgk1lN9-vBCcpo"
+  port: ":8081"
+  webhook_public_url: "https://himura.tech"
+  webhook_secret: "YOUR_TELEGRAM_WEBHOOK_SECRET"
+
+agent:
+  heartbeat_interval: 1
+
+grpc:
+  port: ":50051"
+
+http:
+  port: ":8081"
+
+crypto_cloud:
+  api_key: "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1dWlkIjoiTnpjeU1EZz0iLCJ0eXBlIjoicHJvamVjdCIsInYiOiJhYzM2ZTRlNDBlMjRkM2MzNWQ0Mzg1OWQ2OTQ4NDVmZTM0NTZmZmU2OTgzN2E2ZTJkZjA0YWQ0YjRhY2YwZDM0IiwiZXhwIjo4ODE2MjE4MTM0Nn0.MXosQ3kA6o7S5IUbKlw8wIjxJ02niPHn8aANk9QPxOM"
+  shop_id: "MuDWhBTwvo2PAIZQ"
+  api_secret: "SOFRnr6VqFXAr0N4kczq4wBqHBeUrYEs0oOu"
+  base_url: "https://api.cryptocloud.plus/v2"
+  order_ttl: 3600
+  default_email: "haaaaarakiri@gmail.com"
+  methods:
+    - "crypto"
