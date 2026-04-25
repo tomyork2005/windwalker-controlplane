@@ -1,7 +1,5 @@
 package model
 
-import "fmt"
-
 type VlessCreds struct {
 	UserID string
 
@@ -17,8 +15,8 @@ type VlessCreds struct {
 	URI      string
 }
 
-func (v *VlessCreds) ToTelegramClientOutput() string {
-	return fmt.Sprintf("Ваша ссылка для подлюключения готова - %s, \n информацию по подключению можете найти в /instruction", v.URI)
+func (v *VlessCreds) GetLink() string {
+	return v.URI
 }
 
 func (v *VlessCreds) GetUserID() string {

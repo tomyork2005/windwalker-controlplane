@@ -11,7 +11,7 @@ import (
 	tele "gopkg.in/telebot.v4"
 )
 
-const mainMenuText = `🌍 <b>Wind-Walker VPN</b> — быстрый и надёжный VPN-сервис со стабильным подключением
+const mainMenuText = `🕊️ <b>Wind-Walker VPN</b> — быстрый и надёжный VPN-сервис со стабильным подключением
 
 ⚡ Высокая скорость подключения
 🎁 Бесплатный пробный доступ на 3 дня
@@ -118,7 +118,7 @@ func (b *Bot) renderMySubscription(ctx context.Context, c tele.Context) error {
 		sb.WriteString("\n🔗 <b>Ссылка для подключения:</b>\n")
 		fmt.Fprintf(&sb, "<code>%s</code>", html.EscapeString(*sub.Creds))
 	} else {
-		sb.WriteString("\n⏳ Доступ ещё готовится — придёт отдельным сообщением, как только агент его выдаст.")
+		sb.WriteString("\n⏳ Готовим подключение. Придёт отдельным сообщением через пару секунд.")
 	}
 
 	var kb tele.ReplyMarkup

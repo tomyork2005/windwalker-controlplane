@@ -5,6 +5,7 @@ import (
 	"control-plane/internal/model"
 	"errors"
 	"fmt"
+	"html"
 	"log/slog"
 	"time"
 )
@@ -21,7 +22,7 @@ type AgentReceiverStorage interface {
 
 type VPNCreds interface {
 	GetUserID() string
-	ToTelegramClientOutput() string
+	GetLink() string
 }
 
 type AgentReceiver struct {
@@ -79,10 +80,11 @@ func (s *AgentReceiver) HandleStartUserSubscribeResponse(ctx context.Context, su
 		return fmt.Errorf("fail resolve chat id: %w", err)
 	}
 
-	message := creds.ToTelegramClientOutput()
+	link := creds.GetLink()
+	message := fmt.Sprintf("🕊️ Подключение готово!\n\n<code>%s</code>\n\nИнструкция — в «Моя подписка».", html.EscapeString(link))
 
 	return s.store.WithTx(ctx, func(ctx context.Context) error {
-		if err := s.store.StoreSubscriptionCreds(ctx, subscribeID, message); err != nil {
+		if err := s.store.StoreSubscriptionCreds(ctx, subscribeID, link); err != nil {
 			return fmt.Errorf("fail store subscription creds: %w", err)
 		}
 
