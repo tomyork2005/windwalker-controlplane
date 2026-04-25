@@ -6,6 +6,8 @@ telegram:
   port: ":8081"
   webhook_public_url: "https://himura.tech"
   webhook_secret: "YOUR_TELEGRAM_WEBHOOK_SECRET"
+  support_username: "windwalker_support"
+  about_text: "Wind-Walker VPN — быстрый и надёжный VPN-сервис со стабильным подключением. Без логов, без рекламы, со сменой регионов."
 
 agent:
   heartbeat_interval: 1

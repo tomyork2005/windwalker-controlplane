@@ -86,8 +86,9 @@ func (s *ProcessService) ProcessPaymentCallback(ctx context.Context, req model.C
 		sub := &model.Subscription{
 			ID:        uuid.NewString(),
 			UserID:    inv.UserID,
-			InvoiceID: inv.ID,
+			InvoiceID: &inv.ID,
 			PlanID:    plan.ID,
+			ChatID:    inv.ChatID,
 			Status:    model.ActiveSubscriptionStatus,
 			StartAt:   time.Now().UTC(),
 			EndAt:     time.Now().UTC().AddDate(0, 0, int(plan.DurationDays)),

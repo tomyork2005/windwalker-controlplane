@@ -112,6 +112,34 @@ func buildDurationBtns(plans []*model.Plan, region, proto string) *tele.ReplyMar
 	return &kb
 }
 
+func buildTrialRegionBtns(plans []*model.Plan) *tele.ReplyMarkup {
+	set := map[string]struct{}{}
+	for _, p := range plans {
+		if !p.IsTrial || p.Archived || p.Region == "" {
+			continue
+		}
+		set[p.Region] = struct{}{}
+	}
+	if len(set) == 0 {
+		return nil
+	}
+
+	regions := make([]string, 0, len(set))
+	for r := range set {
+		regions = append(regions, r)
+	}
+	sort.Strings(regions)
+
+	var kb tele.ReplyMarkup
+	rows := make([]tele.Row, 0, len(regions)+1)
+	for _, region := range regions {
+		rows = append(rows, kb.Row(kb.Data(region, string(actTrialActivate), region)))
+	}
+	rows = append(rows, kb.Row(kb.Data("⬅ Назад", string(actBackToMain), "")))
+	kb.Inline(rows...)
+	return &kb
+}
+
 func buildPaymentMethodBtns(methods []*model.PaymentMethod, planID string) *tele.ReplyMarkup {
 	var kb tele.ReplyMarkup
 	rows := []tele.Row{

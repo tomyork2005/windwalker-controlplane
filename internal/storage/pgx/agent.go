@@ -78,10 +78,9 @@ func (s *Storage) UpdateAgentHeartbeat(
 
 func (s *Storage) ResolveChatIDBySubscribeID(ctx context.Context, subscribeID string) (int64, error) {
 	const query = `
-		SELECT i.chat_id
-		FROM subscriptions s
-		JOIN invoices i ON i.id = s.invoice_id
-		WHERE s.id = $1
+		SELECT chat_id
+		FROM subscriptions
+		WHERE id = $1
 		LIMIT 1
 	`
 

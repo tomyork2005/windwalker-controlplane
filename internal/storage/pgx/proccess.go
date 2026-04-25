@@ -89,12 +89,14 @@ func (s *Storage) CreateSubscription(ctx context.Context, sub *model.Subscriptio
 			user_id,
 			invoice_id,
 			plan_id,
+			chat_id,
 			status,
+			is_trial,
 			start_at,
 			end_at
 		)
 		VALUES (
-			$1, $2, $3, $4, $5, $6, $7
+			$1, $2, $3, $4, $5, $6, $7, $8, $9
 		)
 	`
 
@@ -105,7 +107,9 @@ func (s *Storage) CreateSubscription(ctx context.Context, sub *model.Subscriptio
 		sub.UserID,
 		sub.InvoiceID,
 		sub.PlanID,
+		sub.ChatID,
 		string(sub.Status),
+		sub.IsTrial,
 		sub.StartAt,
 		sub.EndAt,
 	)

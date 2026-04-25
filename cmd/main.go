@@ -46,7 +46,7 @@ func main() {
 	crypto := cryptocloud.NewProvider(cfg.CryptoCloudConfig, &http.Client{Timeout: 10 * time.Second})
 	payments := payment.NewPayments(crypto)
 
-	shop := service.NewShopService(payments, storage)
+	shop := service.NewShopService(payments, storage, storage)
 	process := service.NewProcessService(payments, storage, storage)
 
 	bot, err := telegram.NewBot(ctx, cfg.TelegramConfig, shop)

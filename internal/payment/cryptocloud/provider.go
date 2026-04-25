@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"math"
 	"net/http"
 	"time"
 
@@ -18,7 +17,6 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-const rubToUsdRateMvp = 60.0
 const providerName = "CryptoCloud"
 
 type Provider struct {
@@ -51,19 +49,15 @@ func (p *Provider) Methods() []string {
 func (p *Provider) CreatePaymentOrder(ctx context.Context, input model.CreateOrderInput) (model.CreateOrderOutput, error) {
 	var out model.CreateOrderOutput
 
-	amountUSD, err := convertToUSD(input.Money)
+	amountMinor, err := toMinorUnits(input.Money)
 	if err != nil {
 		return out, err
 	}
 
-	/*	if input.Money.Curr != model.USDCurrency {
-		return out, errors.New("for crypto payment method currency must be USD")
-	}*/
-
 	params := map[string]any{
 		"shop_id":  p.cfg.ShopID,
-		"amount":   amountUSD,
-		"currency": string(model.USDCurrency),
+		"amount":   amountMinor,
+		"currency": string(input.Money.Curr),
 		"order_id": input.InvoiceID,
 		"email":    p.cfg.DefaultEmail,
 		"add_fields": map[string]any{
@@ -202,24 +196,13 @@ func mapStatus(status string) model.InvoiceStatus {
 	}
 }
 
-func convertToUSD(m model.Money) (float64, error) {
+// toMinorUnits переводит сумму из основных единиц (рубли/доллары)
+// в копейки/центы — CryptoCloud принимает amount в минимальных единицах.
+func toMinorUnits(m model.Money) (int64, error) {
 	switch m.Curr {
-	case model.USDCurrency:
-		// amount хранится в центах -> переводим в доллары
-		usd := float64(m.Amount) / 100
-		return round2(usd), nil
-
-	case model.RUBCurrency:
-		// amount хранится в копейках
-		rub := float64(m.Amount) / 100
-		usd := rub / rubToUsdRateMvp
-		return round2(usd), nil
-
+	case model.RUBCurrency, model.USDCurrency:
+		return m.Amount * 100, nil
 	default:
 		return 0, fmt.Errorf("cryptocloud: unsupported currency %q", m.Curr)
 	}
-}
-
-func round2(v float64) float64 {
-	return math.Round(v*100) / 100
 }

@@ -41,8 +41,9 @@ const (
 )
 
 type User struct {
-	ID       string
-	Username string
+	ID         string
+	Username   string
+	TelegramID *int64
 }
 type Plan struct {
 	ID           string
@@ -52,6 +53,7 @@ type Plan struct {
 	Money        Money
 	DurationDays int64
 	Archived     bool
+	IsTrial      bool
 }
 
 type Invoice struct {
@@ -101,13 +103,25 @@ type CallbackOutput struct {
 }
 
 type Subscription struct {
-	ID        string
-	UserID    string
-	InvoiceID string
-	PlanID    string
-	Status    SubscriptionStatus
-	StartAt   time.Time
-	EndAt     time.Time
+	ID           string
+	UserID       string
+	InvoiceID    *string
+	PlanID       string
+	ChatID       int64
+	Status       SubscriptionStatus
+	IsTrial      bool
+	StartAt      time.Time
+	EndAt        time.Time
+	Creds        *string
+	CredsReadyAt *time.Time
+}
+
+type SubscriptionWithPlan struct {
+	Subscription
+	PlanName     string
+	Region       string
+	DriverType   string
+	DurationDays int64
 }
 
 type Agent struct {
