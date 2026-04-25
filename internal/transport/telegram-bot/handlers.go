@@ -18,10 +18,9 @@ import (
 
 type ShopService interface {
 	ListPlans(ctx context.Context) ([]*model.Plan, error)
-	ListTrialPlans(ctx context.Context) ([]*model.Plan, error)
 	ListPaymentMethods(ctx context.Context) ([]*model.PaymentMethod, error)
 	CreateInvoice(ctx context.Context, planID string, telegramID int64, username string, methodID string, chatID int64) (*model.Invoice, error)
-	ActivateTrial(ctx context.Context, telegramID int64, username, region string, chatID int64) (*model.Subscription, error)
+	ActivateTrial(ctx context.Context, telegramID int64, username string, chatID int64) (*model.Subscription, error)
 	UpsertUserByTelegramID(ctx context.Context, telegramID int64, username string) (*model.User, error)
 	GetActiveSubscriptionByUser(ctx context.Context, userID string) (*model.SubscriptionWithPlan, error)
 	HasUsedTrial(ctx context.Context, userID string) (bool, error)
@@ -30,13 +29,12 @@ type ShopService interface {
 type action string
 
 const (
-	actMenuBuy         action = "menu_buy"
-	actMySubscription  action = "my_subscription"
-	actAbout           action = "about"
-	actSupport         action = "support"
-	actBackToMain      action = "back_to_main"
-	actTrialPickRegion action = "trial_pick_region"
-	actTrialActivate   action = "trial_activate"
+	actMenuBuy        action = "menu_buy"
+	actMySubscription action = "my_subscription"
+	actAbout          action = "about"
+	actSupport        action = "support"
+	actBackToMain     action = "back_to_main"
+	actTrialActivate  action = "trial_activate"
 
 	actPickRegion        action = "pick_region"
 	actPickProtocol      action = "pick_protocol"
@@ -50,7 +48,6 @@ var cbRouter = map[action]func(*Bot, tele.Context, string) error{
 	actAbout:             (*Bot).onAbout,
 	actSupport:           (*Bot).onSupport,
 	actBackToMain:        (*Bot).onBackToMain,
-	actTrialPickRegion:   (*Bot).onTrialPickRegion,
 	actTrialActivate:     (*Bot).onTrialActivate,
 	actPickRegion:        (*Bot).onPickRegion,
 	actPickProtocol:      (*Bot).onPickProtocol,
@@ -103,10 +100,14 @@ func (b *Bot) registerHandlers() {
 	b.bot.Use(middleware.AutoRespond())
 
 	b.bot.Handle("/start", func(c tele.Context) error {
-		return b.renderMainMenu(c)
+		ctx, cancel := context.WithTimeout(b.appCtx, 5*time.Second)
+		defer cancel()
+		return b.renderMainMenu(ctx, c)
 	})
 	b.bot.Handle("/menu", func(c tele.Context) error {
-		return b.renderMainMenu(c)
+		ctx, cancel := context.WithTimeout(b.appCtx, 5*time.Second)
+		defer cancel()
+		return b.renderMainMenu(ctx, c)
 	})
 
 	b.bot.Handle(tele.OnCallback, func(c tele.Context) error {
@@ -129,7 +130,9 @@ func (b *Bot) registerHandlers() {
 }
 
 func (b *Bot) onBackToMain(c tele.Context, _ string) error {
-	return b.renderMainMenu(c)
+	ctx, cancel := context.WithTimeout(b.appCtx, 5*time.Second)
+	defer cancel()
+	return b.renderMainMenu(ctx, c)
 }
 
 func (b *Bot) onAbout(c tele.Context, _ string) error {
@@ -146,26 +149,16 @@ func (b *Bot) onMySubscription(c tele.Context, _ string) error {
 	return b.renderMySubscription(ctx, c)
 }
 
-func (b *Bot) onTrialPickRegion(c tele.Context, _ string) error {
-	ctx, cancel := context.WithTimeout(b.appCtx, 5*time.Second)
-	defer cancel()
-	return b.renderTrialRegionPicker(ctx, c)
-}
-
-func (b *Bot) onTrialActivate(c tele.Context, region string) error {
+func (b *Bot) onTrialActivate(c tele.Context, _ string) error {
 	ctx, cancel := context.WithTimeout(b.appCtx, 5*time.Second)
 	defer cancel()
 
-	if region == "" {
-		return c.Respond(&tele.CallbackResponse{Text: "Регион не указан", ShowAlert: true})
-	}
-
-	_, err := b.svc.ActivateTrial(ctx, c.Sender().ID, c.Sender().Username, region, c.Chat().ID)
+	_, err := b.svc.ActivateTrial(ctx, c.Sender().ID, c.Sender().Username, c.Chat().ID)
 	switch {
 	case errors.Is(err, service.ErrTrialAlreadyUsed):
 		return c.Respond(&tele.CallbackResponse{Text: "Триал уже был активирован", ShowAlert: true})
-	case errors.Is(err, service.ErrNoTrialPlanForRegion):
-		return c.Respond(&tele.CallbackResponse{Text: "Для этого региона триал недоступен", ShowAlert: true})
+	case errors.Is(err, service.ErrNoTrialPlanAvailable):
+		return c.Respond(&tele.CallbackResponse{Text: "Триал сейчас недоступен", ShowAlert: true})
 	case err != nil:
 		slog.Error("activate trial", "err", err)
 		return c.Respond(&tele.CallbackResponse{Text: "Что-то пошло не так", ShowAlert: true})

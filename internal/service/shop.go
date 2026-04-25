@@ -3,8 +3,6 @@ package service
 import (
 	"context"
 	"control-plane/internal/model"
-	store "control-plane/internal/storage"
-	"errors"
 	"log/slog"
 	"time"
 
@@ -27,7 +25,6 @@ type ShopStorage interface {
 	GetAllPlans(ctx context.Context) ([]*model.Plan, error)
 	GetAllTrialPlans(ctx context.Context) ([]*model.Plan, error)
 	GetPlanByID(ctx context.Context, planID string) (*model.Plan, error)
-	GetTrialPlanByRegion(ctx context.Context, region string) (*model.Plan, error)
 	GetAllPaymentMethods(ctx context.Context) ([]*model.PaymentMethod, error)
 	CreateInvoice(ctx context.Context, invoice *model.Invoice) error
 	CreateSubscription(ctx context.Context, sub *model.Subscription) error
@@ -118,7 +115,7 @@ func (s *ShopService) CreateInvoice(ctx context.Context, planID string, telegram
 	return invoice, nil
 }
 
-func (s *ShopService) ActivateTrial(ctx context.Context, telegramID int64, username, region string, chatID int64) (*model.Subscription, error) {
+func (s *ShopService) ActivateTrial(ctx context.Context, telegramID int64, username string, chatID int64) (*model.Subscription, error) {
 	var sub *model.Subscription
 
 	err := s.storage.WithTx(ctx, func(ctx context.Context) error {
@@ -135,13 +132,14 @@ func (s *ShopService) ActivateTrial(ctx context.Context, telegramID int64, usern
 			return ErrTrialAlreadyUsed
 		}
 
-		plan, err := s.storage.GetTrialPlanByRegion(ctx, region)
+		plans, err := s.storage.GetAllTrialPlans(ctx)
 		if err != nil {
-			if errors.Is(err, store.ErrNotFound) {
-				return ErrNoTrialPlanForRegion
-			}
 			return err
 		}
+		if len(plans) == 0 {
+			return ErrNoTrialPlanAvailable
+		}
+		plan := plans[0]
 
 		now := time.Now().UTC()
 		sub = &model.Subscription{

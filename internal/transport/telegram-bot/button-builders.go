@@ -8,6 +8,34 @@ import (
 	"strings"
 )
 
+// regionDisplay returns "<flag> <human-readable name>" for a region code.
+// Falls back to the raw code if unknown.
+var regionDisplay = map[string]string{
+	"lv": "🇱🇻 Латвия",
+	"nl": "🇳🇱 Нидерланды",
+	"de": "🇩🇪 Германия",
+	"fi": "🇫🇮 Финляндия",
+	"fr": "🇫🇷 Франция",
+	"us": "🇺🇸 США",
+	"uk": "🇬🇧 Великобритания",
+	"gb": "🇬🇧 Великобритания",
+	"pl": "🇵🇱 Польша",
+	"se": "🇸🇪 Швеция",
+	"no": "🇳🇴 Норвегия",
+	"ee": "🇪🇪 Эстония",
+	"lt": "🇱🇹 Литва",
+	"jp": "🇯🇵 Япония",
+	"sg": "🇸🇬 Сингапур",
+	"tr": "🇹🇷 Турция",
+}
+
+func regionLabel(code string) string {
+	if v, ok := regionDisplay[strings.ToLower(code)]; ok {
+		return v
+	}
+	return strings.ToUpper(code)
+}
+
 func buildRegionBtns(plans []*model.Plan) *tele.ReplyMarkup {
 	set := map[string]struct{}{}
 	for _, p := range plans {
@@ -32,13 +60,14 @@ func buildRegionBtns(plans []*model.Plan) *tele.ReplyMarkup {
 	var rows []tele.Row
 	row := make([]tele.Btn, 0, 3)
 	for i, region := range regions {
-		btn := kb.Data(region, string(actPickRegion), region) // Unique = действие, Data = region
+		btn := kb.Data(regionLabel(region), string(actPickRegion), region) // Unique = действие, Data = region
 		row = append(row, btn)
 		if len(row) == 3 || i == len(regions)-1 {
 			rows = append(rows, kb.Row(row...))
 			row = row[:0]
 		}
 	}
+	rows = append(rows, kb.Row(kb.Data("◀ В меню", string(actBackToMain), "")))
 	kb.Inline(rows...)
 	return &kb
 }
@@ -77,6 +106,7 @@ func buildProtocolBtns(plans []*model.Plan, region string) *tele.ReplyMarkup {
 			row = row[:0]
 		}
 	}
+	rows = append(rows, kb.Row(kb.Data("◀ В меню", string(actBackToMain), "")))
 	kb.Inline(rows...)
 	return &kb
 }
@@ -108,34 +138,7 @@ func buildDurationBtns(plans []*model.Plan, region, proto string) *tele.ReplyMar
 		title := fmt.Sprintf("%s — %d %s", p.Name, p.Money.Amount, p.Money.Curr)
 		rows = append(rows, kb.Row(kb.Data(title, string(actPickDuration), p.ID)))
 	}
-	kb.Inline(rows...)
-	return &kb
-}
-
-func buildTrialRegionBtns(plans []*model.Plan) *tele.ReplyMarkup {
-	set := map[string]struct{}{}
-	for _, p := range plans {
-		if !p.IsTrial || p.Archived || p.Region == "" {
-			continue
-		}
-		set[p.Region] = struct{}{}
-	}
-	if len(set) == 0 {
-		return nil
-	}
-
-	regions := make([]string, 0, len(set))
-	for r := range set {
-		regions = append(regions, r)
-	}
-	sort.Strings(regions)
-
-	var kb tele.ReplyMarkup
-	rows := make([]tele.Row, 0, len(regions)+1)
-	for _, region := range regions {
-		rows = append(rows, kb.Row(kb.Data(region, string(actTrialActivate), region)))
-	}
-	rows = append(rows, kb.Row(kb.Data("⬅ Назад", string(actBackToMain), "")))
+	rows = append(rows, kb.Row(kb.Data("◀ В меню", string(actBackToMain), "")))
 	kb.Inline(rows...)
 	return &kb
 }
@@ -151,6 +154,7 @@ func buildPaymentMethodBtns(methods []*model.PaymentMethod, planID string) *tele
 		rows = append(rows, kb.Row(kb.Data(method.Name, string(actPickPaymentMethod), payload)))
 	}
 
+	rows = append(rows, kb.Row(kb.Data("◀ В меню", string(actBackToMain), "")))
 	kb.Inline(rows...)
 	return &kb
 }

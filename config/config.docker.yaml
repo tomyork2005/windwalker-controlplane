@@ -8,6 +8,7 @@ telegram:
   webhook_secret: "YOUR_TELEGRAM_WEBHOOK_SECRET"
   support_username: "windwalker_support"
   about_text: "Wind-Walker VPN — быстрый и надёжный VPN-сервис со стабильным подключением. Без логов, без рекламы, со сменой регионов."
+  instruction_url: ""
 
 agent:
   heartbeat_interval: 1

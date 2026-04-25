@@ -28,6 +28,7 @@ type TelegramConfig struct {
 	WebhookSecret    string `yaml:"webhook_secret" env:"TELEGRAM_SECRET"`
 	SupportUsername  string `yaml:"support_username" env:"TELEGRAM_SUPPORT" env-default:"vpn_support"`
 	AboutText        string `yaml:"about_text" env:"TELEGRAM_ABOUT" env-default:"Wind-Walker VPN — быстрый и надёжный VPN-сервис со стабильным подключением."`
+	InstructionURL   string `yaml:"instruction_url" env:"TELEGRAM_INSTRUCTION_URL" env-default:""`
 }
 
 type AgentConfig struct {
