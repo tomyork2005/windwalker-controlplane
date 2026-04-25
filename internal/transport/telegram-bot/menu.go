@@ -26,11 +26,27 @@ func (b *Bot) editOrSend(c tele.Context, text string, kb *tele.ReplyMarkup, opts
 	args = append(args, opts...)
 
 	if c.Callback() != nil {
+		// Photo messages must use editMessageCaption; text messages must use editMessageText.
+		// Try caption first (main menu / any screen sent as photo), fall back to text edit.
+		if err := c.EditCaption(text, args...); err == nil {
+			return nil
+		}
 		if err := c.Edit(text, args...); err == nil {
 			return nil
 		}
 	}
-	return c.Send(text, args...)
+
+	photo := b.photoCache.Build(text)
+	if photo == nil {
+		return c.Send(text, args...)
+	}
+	msg, err := b.bot.Send(c.Recipient(), photo, args...)
+	if err != nil {
+		// photo upload failed — last resort, send as plain text so user sees something.
+		return c.Send(text, args...)
+	}
+	b.photoCache.Capture(msg)
+	return nil
 }
 
 func (b *Bot) renderMainMenu(ctx context.Context, c tele.Context) error {

@@ -25,6 +25,7 @@ ENTRYPOINT ["goose", "-dir", "/migrations"]
 FROM gcr.io/distroless/static-debian12:nonroot AS runtime
 WORKDIR /app
 COPY --from=builder /out/control-plane /app/control-plane
+COPY --from=builder /src/assets /app/assets
 ENV CONFIG_PATH=/app/config.yaml
 USER nonroot:nonroot
 EXPOSE 8081 50051

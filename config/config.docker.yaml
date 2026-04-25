@@ -9,6 +9,7 @@ telegram:
   support_username: "windwalker_support"
   about_text: "Wind-Walker VPN — быстрый и надёжный VPN-сервис со стабильным подключением. Без логов, без рекламы, со сменой регионов."
   instruction_url: ""
+  main_menu_image_path: "/app/assets/main-menu.jpg"
 
 agent:
   heartbeat_interval: 1

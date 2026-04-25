@@ -56,12 +56,13 @@ var cbRouter = map[action]func(*Bot, tele.Context, string) error{
 }
 
 type Bot struct {
-	cfg     config.TelegramConfig
-	svc     ShopService
-	bot     *tele.Bot
-	state   *SafeState
-	webhook *tele.Webhook
-	appCtx  context.Context
+	cfg        config.TelegramConfig
+	svc        ShopService
+	bot        *tele.Bot
+	state      *SafeState
+	webhook    *tele.Webhook
+	appCtx     context.Context
+	photoCache *PhotoCache
 }
 
 func NewBot(ctx context.Context, config config.TelegramConfig, service ShopService) (*Bot, error) {
@@ -81,12 +82,13 @@ func NewBot(ctx context.Context, config config.TelegramConfig, service ShopServi
 	}
 
 	bot := &Bot{
-		cfg:     config,
-		svc:     service,
-		bot:     tb,
-		webhook: hook,
-		state:   NewSafeState(),
-		appCtx:  ctx,
+		cfg:        config,
+		svc:        service,
+		bot:        tb,
+		webhook:    hook,
+		state:      NewSafeState(),
+		appCtx:     ctx,
+		photoCache: NewPhotoCache(config.MainMenuImagePath),
 	}
 	bot.registerHandlers()
 	return bot, nil

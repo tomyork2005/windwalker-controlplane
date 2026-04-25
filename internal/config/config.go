@@ -22,13 +22,14 @@ type Postgres struct {
 }
 
 type TelegramConfig struct {
-	BotToken         string `yaml:"bot_token" env:"TELEGRAM_BOT_TOKEN"`
-	Port             string `yaml:"port" env:"TELEGRAM_PORT"`
-	WebhookPublicURL string `yaml:"webhook_public_url" env:"TELEGRAM_PUBLIC_URL"`
-	WebhookSecret    string `yaml:"webhook_secret" env:"TELEGRAM_SECRET"`
-	SupportUsername  string `yaml:"support_username" env:"TELEGRAM_SUPPORT" env-default:"vpn_support"`
-	AboutText        string `yaml:"about_text" env:"TELEGRAM_ABOUT" env-default:"Wind-Walker VPN — быстрый и надёжный VPN-сервис со стабильным подключением."`
-	InstructionURL   string `yaml:"instruction_url" env:"TELEGRAM_INSTRUCTION_URL" env-default:""`
+	BotToken          string `yaml:"bot_token" env:"TELEGRAM_BOT_TOKEN"`
+	Port              string `yaml:"port" env:"TELEGRAM_PORT"`
+	WebhookPublicURL  string `yaml:"webhook_public_url" env:"TELEGRAM_PUBLIC_URL"`
+	WebhookSecret     string `yaml:"webhook_secret" env:"TELEGRAM_SECRET"`
+	SupportUsername   string `yaml:"support_username" env:"TELEGRAM_SUPPORT" env-default:"vpn_support"`
+	AboutText         string `yaml:"about_text" env:"TELEGRAM_ABOUT" env-default:"Wind-Walker VPN — быстрый и надёжный VPN-сервис со стабильным подключением."`
+	InstructionURL    string `yaml:"instruction_url" env:"TELEGRAM_INSTRUCTION_URL" env-default:""`
+	MainMenuImagePath string `yaml:"main_menu_image_path" env:"TELEGRAM_MENU_IMAGE" env-default:"/app/assets/main-menu.jpg"`
 }
 
 type AgentConfig struct {
