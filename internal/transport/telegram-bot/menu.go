@@ -140,7 +140,11 @@ func (b *Bot) renderAbout(c tele.Context) error {
 		text = "Wind-Walker VPN — быстрый и надёжный VPN-сервис."
 	}
 	var kb tele.ReplyMarkup
-	kb.Inline(kb.Row(kb.Data("◀ В меню", string(actBackToMain), "")))
+	kb.Inline(
+		kb.Row(kb.URL("🔒 Политика конфиденциальности", "https://telegra.ph/Politika-konfidencialnosti-04-01-26")),
+		kb.Row(kb.URL("📄 Пользовательское соглашение", "https://telegra.ph/Polzovatelskoe-soglashenie-04-01-19")),
+		kb.Row(kb.Data("◀ В меню", string(actBackToMain), "")),
+	)
 	return b.editOrSend(c, text, &kb)
 }
 
