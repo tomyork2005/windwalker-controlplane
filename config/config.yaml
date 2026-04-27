@@ -31,8 +31,8 @@ crypto_cloud:
     - "crypto"
 
 platega:
-  merchant_id: ""
-  secret: ""
+  merchant_id: "cc2e4910-aca1-4f1d-9492-e724861c1501"
+  secret: "7o0IgCmFtZeku8kLYqqwZxozMuvsI9yEClwApRcqxZTzYTKn5qfKeR73jU6oP1uV2Lgf8yU3cWnoGzAG5vUvT4LE0BSZLWidsLBX"
   base_url: "https://app.platega.io"
   return_url: ""
   failed_url: ""
