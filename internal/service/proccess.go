@@ -20,7 +20,7 @@ type Outbox interface {
 }
 
 type ProcessStorage interface {
-	GetInvoiceForUpdate(ctx context.Context, uuid string) (*model.Invoice, error)
+	GetInvoiceByProviderOrder(ctx context.Context, providerName, providerOrderID string) (*model.Invoice, error)
 	GetPlanByID(ctx context.Context, planID string) (*model.Plan, error)
 	UpdateInvoice(ctx context.Context, invoice *model.Invoice) error
 	CreateSubscription(ctx context.Context, sub *model.Subscription) error
@@ -45,12 +45,15 @@ func NewProcessService(payment ProcessPayment, storage ProcessStorage, outbox Ou
 func (s *ProcessService) ProcessPaymentCallback(ctx context.Context, req model.CallbackInput) error {
 	callback, err := s.payment.VerifyCallback(req)
 	if err != nil {
-		// todo route errors  --> response to provider
 		return err
 	}
 
+	if callback.PaymentOrderID == "" {
+		return fmt.Errorf("callback %s has empty provider order id", callback.ProviderName)
+	}
+
 	return s.storage.WithTx(ctx, func(ctx context.Context) error {
-		inv, err := s.storage.GetInvoiceForUpdate(ctx, callback.InvoiceID)
+		inv, err := s.storage.GetInvoiceByProviderOrder(ctx, callback.ProviderName, callback.PaymentOrderID)
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
 				return nil
@@ -58,13 +61,13 @@ func (s *ProcessService) ProcessPaymentCallback(ctx context.Context, req model.C
 			return err
 		}
 
-		// idempotency, if provider retry nothing to do
 		if inv.Status == model.SuccessInvoiceStatus {
 			return nil
 		}
 
-		if inv.PaymentProvider != callback.ProviderName {
-			return fmt.Errorf("provider mismatch: invoice=%s, callback=%s", inv.PaymentProvider, callback.ProviderName)
+		if callback.Status != model.SuccessInvoiceStatus {
+			inv.Status = callback.Status
+			return s.storage.UpdateInvoice(ctx, inv)
 		}
 
 		inv.Status = model.SuccessInvoiceStatus

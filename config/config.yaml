@@ -29,3 +29,13 @@ crypto_cloud:
   default_email: "haaaaarakiri@gmail.com"
   methods:
     - "crypto"
+
+platega:
+  merchant_id: ""
+  secret: ""
+  base_url: "https://app.platega.io"
+  return_url: ""
+  failed_url: ""
+  methods:
+    - "sbp"
+    - "crypto_platega"

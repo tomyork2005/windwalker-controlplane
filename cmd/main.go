@@ -20,6 +20,7 @@ import (
 	"control-plane/internal/config"
 	"control-plane/internal/payment"
 	"control-plane/internal/payment/cryptocloud"
+	"control-plane/internal/payment/platega"
 	"control-plane/internal/service"
 	"control-plane/internal/storage/pgx"
 	"control-plane/internal/transport/agent"
@@ -44,7 +45,8 @@ func main() {
 	}
 
 	crypto := cryptocloud.NewProvider(cfg.CryptoCloudConfig, &http.Client{Timeout: 10 * time.Second})
-	payments := payment.NewPayments(crypto)
+	plt := platega.NewProvider(cfg.PlategaConfig, &http.Client{Timeout: 10 * time.Second})
+	payments := payment.NewPayments(crypto, plt)
 
 	shop := service.NewShopService(payments, storage, storage)
 	process := service.NewProcessService(payments, storage, storage)

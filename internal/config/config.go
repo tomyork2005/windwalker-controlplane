@@ -15,6 +15,7 @@ type Config struct {
 
 	// payments config
 	CryptoCloudConfig `yaml:"crypto_cloud"`
+	PlategaConfig     `yaml:"platega"`
 }
 
 type Postgres struct {
@@ -44,6 +45,15 @@ type CryptoCloudConfig struct {
 	OrderTTL     int      `yaml:"order_ttl" env:"ORDER_TTL"`
 	DefaultEmail string   `yaml:"default_email" env:"DEFAULT_EMAIL"`
 	Methods      []string `yaml:"methods" env:"METHODS"`
+}
+
+type PlategaConfig struct {
+	MerchantID string   `yaml:"merchant_id" env:"PLATEGA_MERCHANT_ID"`
+	Secret     string   `yaml:"secret" env:"PLATEGA_SECRET"`
+	BaseURL    string   `yaml:"base_url" env:"PLATEGA_BASE_URL" env-default:"https://app.platega.io"`
+	Methods    []string `yaml:"methods" env:"PLATEGA_METHODS"`
+	ReturnURL  string   `yaml:"return_url" env:"PLATEGA_RETURN_URL"`
+	FailedURL  string   `yaml:"failed_url" env:"PLATEGA_FAILED_URL"`
 }
 
 type HTTPConfig struct {

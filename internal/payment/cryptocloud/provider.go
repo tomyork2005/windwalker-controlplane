@@ -96,7 +96,7 @@ func (p *Provider) CreatePaymentOrder(ctx context.Context, input model.CreateOrd
 
 	var response invoiceCreateResponse
 	if err := json.Unmarshal(raw, &response); err != nil {
-		slog.Error("cryptocloud: unmarshalling response: %w", err, "response", string(raw))
+		slog.Error("cryptocloud: unmarshalling response", "err", err, "response", string(raw))
 		return out, fmt.Errorf("cryptocloud: resp decode json: %w", err)
 	}
 

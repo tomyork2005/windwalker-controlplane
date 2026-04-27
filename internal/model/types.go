@@ -58,6 +58,7 @@ type Plan struct {
 
 type Invoice struct {
 	ID              string
+	ProviderOrderID string
 	UserID          string
 	PlanID          string
 	ChatID          int64
@@ -83,6 +84,7 @@ type CreateOrderInput struct {
 
 type CallbackInput struct {
 	ProviderName string
+	Headers      map[string]string
 	Body         []byte
 }
 

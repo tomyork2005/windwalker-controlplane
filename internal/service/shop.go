@@ -98,6 +98,7 @@ func (s *ShopService) CreateInvoice(ctx context.Context, planID string, telegram
 
 	invoice := &model.Invoice{
 		ID:              invoiceID,
+		ProviderOrderID: output.ProviderOrderID,
 		UserID:          user.ID,
 		PlanID:          plan.ID,
 		ChatID:          chatID,

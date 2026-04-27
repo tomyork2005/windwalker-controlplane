@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS payment_methods (
 
 CREATE TABLE IF NOT EXISTS invoices (
     id TEXT PRIMARY KEY,
+    provider_order_id TEXT NULL,
     user_id TEXT NOT NULL REFERENCES users(id),
     plan_id TEXT NOT NULL REFERENCES plans(id),
     chat_id BIGINT NOT NULL,
@@ -41,6 +42,9 @@ CREATE TABLE IF NOT EXISTS invoices (
 
 CREATE INDEX IF NOT EXISTS idx_invoices_user_id ON invoices(user_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_plan_id ON invoices(plan_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_provider_order
+    ON invoices(payment_provider, provider_order_id)
+    WHERE provider_order_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_plans_archived ON plans(archived);
 CREATE INDEX idx_plans_is_trial ON plans(is_trial) WHERE is_trial = TRUE;
 

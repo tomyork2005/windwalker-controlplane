@@ -239,6 +239,7 @@ func (s *Storage) CreateInvoice(ctx context.Context, invoice *model.Invoice) err
 	const query = `
 		INSERT INTO invoices (
 			id,
+			provider_order_id,
 			user_id,
 			plan_id,
 			chat_id,
@@ -250,13 +251,19 @@ func (s *Storage) CreateInvoice(ctx context.Context, invoice *model.Invoice) err
 			created_at,
 			expires_at
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 	`
+
+	var providerOrderID any
+	if invoice.ProviderOrderID != "" {
+		providerOrderID = invoice.ProviderOrderID
+	}
 
 	_, err := s.getExecutor(ctx).Exec(
 		ctx,
 		query,
 		invoice.ID,
+		providerOrderID,
 		invoice.UserID,
 		invoice.PlanID,
 		invoice.ChatID,

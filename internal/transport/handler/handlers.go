@@ -2,10 +2,13 @@ package handler
 
 import (
 	"context"
-	"control-plane/internal/model"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
+
+	"control-plane/internal/model"
+	"control-plane/internal/payment"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -25,6 +28,7 @@ func NewHandler(svc ProcessService) *Handler {
 func (h *Handler) RegisterRoutes(router chi.Router) {
 	router.Route("/api/control", func(router chi.Router) {
 		router.Post("/payment/cryptocloud/webhook", h.CallbackCryptoCloud)
+		router.Post("/payment/platega/webhook", h.CallbackPlatega)
 	})
 }
 
@@ -54,5 +58,40 @@ func (h *Handler) CallbackCryptoCloud(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
-	return
+}
+
+func (h *Handler) CallbackPlatega(w http.ResponseWriter, r *http.Request) {
+	slog.Info(
+		"platega callback received",
+		"method", r.Method,
+		"path", r.URL.Path,
+	)
+
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	req := model.CallbackInput{
+		ProviderName: "Platega",
+		Headers: map[string]string{
+			"X-MerchantId": r.Header.Get("X-MerchantId"),
+			"X-Secret":     r.Header.Get("X-Secret"),
+		},
+		Body: raw,
+	}
+
+	if err := h.svc.ProcessPaymentCallback(r.Context(), req); err != nil {
+		if errors.Is(err, payment.ErrBadSignature) {
+			slog.Warn("platega callback bad signature")
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		slog.Error("failed to process platega callback", "err", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }

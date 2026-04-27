@@ -14,6 +14,7 @@ func (s *Storage) GetInvoiceForUpdate(ctx context.Context, id string) (*model.In
 	const query = `
 		SELECT
 			id,
+			provider_order_id,
 			user_id,
 			plan_id,
 			chat_id,
@@ -36,6 +37,43 @@ func (s *Storage) GetInvoiceForUpdate(ctx context.Context, id string) (*model.In
 			return nil, storage.ErrNotFound
 		}
 		return nil, fmt.Errorf("get invoice for update: %w", err)
+	}
+
+	invoice, err := row.toModel()
+	if err != nil {
+		return nil, fmt.Errorf("map invoice row: %w", err)
+	}
+
+	return invoice, nil
+}
+
+func (s *Storage) GetInvoiceByProviderOrder(ctx context.Context, providerName, providerOrderID string) (*model.Invoice, error) {
+	const query = `
+		SELECT
+			id,
+			provider_order_id,
+			user_id,
+			plan_id,
+			chat_id,
+			payment_provider,
+			money_amount,
+			money_currency,
+			status,
+			checkout_url,
+			created_at,
+			expires_at,
+			paid_at
+		FROM invoices
+		WHERE payment_provider = $1 AND provider_order_id = $2
+		FOR UPDATE
+	`
+
+	var row invoiceRow
+	if err := pgxscan.Get(ctx, s.getExecutor(ctx), &row, query, providerName, providerOrderID); err != nil {
+		if pgxscan.NotFound(err) {
+			return nil, storage.ErrNotFound
+		}
+		return nil, fmt.Errorf("get invoice by provider order: %w", err)
 	}
 
 	invoice, err := row.toModel()
@@ -124,6 +162,7 @@ func (s *Storage) CreateSubscription(ctx context.Context, sub *model.Subscriptio
 
 type invoiceRow struct {
 	ID              string     `db:"id"`
+	ProviderOrderID *string    `db:"provider_order_id"`
 	UserID          string     `db:"user_id"`
 	PlanID          string     `db:"plan_id"`
 	ChatID          int64      `db:"chat_id"`
@@ -154,6 +193,10 @@ func (r *invoiceRow) toModel() (*model.Invoice, error) {
 		CheckoutURL:     r.CheckoutURL,
 		CreatedAt:       r.CreatedAt,
 		ExpiresAt:       r.ExpiresAt,
+	}
+
+	if r.ProviderOrderID != nil {
+		invoice.ProviderOrderID = *r.ProviderOrderID
 	}
 
 	if r.PaidAt != nil {
