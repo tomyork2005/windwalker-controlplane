@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	cleanerTickPeriod = 5 * time.Minute
+	cleanerTickPeriod = 1 * time.Minute
 	cleanerBatchSize  = 10
 )
 
