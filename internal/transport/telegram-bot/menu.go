@@ -11,7 +11,7 @@ import (
 	tele "gopkg.in/telebot.v4"
 )
 
-const mainMenuText = `🕊️ <b>Wind-Walker VPN</b> - твои паруса в интернете
+const mainMenuText = `🕊️ <b>Wind-Walker VPN</b>
 
 — Серверы 10 Гбит/с - стриминг, загрузки и видеозвонки идут так, будто VPN выключен
 — Полная приватность - мы не ведём логи и не торгуем данными: ваш трафик остаётся вашим.
