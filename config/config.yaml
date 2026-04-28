@@ -4,9 +4,9 @@ postgres:
 telegram:
   bot_token: "8432960541:AAHs5udZjU3bdSmbK0tiZLgk1lN9-vBCcpo"
   port: ":8081"
-  webhook_public_url: "https://eudaemonistic-baylee-blowsier.ngrok-free.dev"
+  webhook_public_url: "https://windwalker.lol"
   webhook_secret: "YOUR_TELEGRAM_WEBHOOK_SECRET"
-  support_username: "windwalker_support"
+  support_username: "123"
   about_text: "Wind-Walker VPN — быстрый и надёжный VPN-сервис со стабильным подключением. Без логов, без рекламы, со сменой регионов."
   instruction_url: ""
   main_menu_image_path: "assets/main-menu.jpg"
