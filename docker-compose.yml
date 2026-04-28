@@ -65,7 +65,7 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     environment:
-      ACME_EMAIL: ${ACME_EMAIL:-admin@himura.tech}
+      ACME_EMAIL: ${ACME_EMAIL:-admin@windwalker.lol}
     depends_on:
       - control-plane
     networks:

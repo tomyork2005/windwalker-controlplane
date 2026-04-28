@@ -31,7 +31,7 @@ crypto_cloud:
   api_secret: "SOFRnr6VqFXAr0N4kczq4wBqHBeUrYEs0oOu"
   base_url: "https://api.cryptocloud.plus/v2"
   order_ttl: 3600
-  default_email: "haaaaarakiri@gmail.com"
+  default_email: "windwalker-vpn@protonmail.com"
   methods:
     - "crypto"
 

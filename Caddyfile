@@ -2,7 +2,7 @@
 	email {$ACME_EMAIL}
 }
 
-himura.tech {
+windwalker.lol {
 	encode zstd gzip
 
 	reverse_proxy control-plane:8081 {
