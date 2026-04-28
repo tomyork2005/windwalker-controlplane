@@ -11,12 +11,13 @@ import (
 	tele "gopkg.in/telebot.v4"
 )
 
-const mainMenuText = `🕊️ <b>Wind-Walker VPN</b> — быстрый и надёжный VPN-сервис со стабильным подключением
+const mainMenuText = `🕊️ <b>Wind-Walker VPN</b>
 
-⚡ Высокая скорость подключения
-🎁 Бесплатный пробный доступ на 3 дня
-📱 Одна подписка для всех видов устройств
-♾ Возможность смотреть YouTube без рекламы`
+Сеть построена на каналах 10 Гбит/с — стриминг, загрузки и видеозвонки идут так, будто VPN выключен. Мы не ведём логи и не торгуем данными: ваш трафик остаётся вашим.
+— Серверы 10 Гбит/с
+— Полная приватность, без журналов активности
+— Одна подписка — все устройства
+— 3 дня бесплатно, чтобы убедиться`
 
 func (b *Bot) renderMainMenu(ctx context.Context, c tele.Context) error {
 	showTrial := true
@@ -27,60 +28,28 @@ func (b *Bot) renderMainMenu(ctx context.Context, c tele.Context) error {
 		showTrial = !used
 	}
 
-	return b.editOrSend(c, mainMenuText, buildMainMenuKeyboard(showTrial), tele.ModeHTML)
+	return b.sendOrEditIconKeyboard(c, mainMenuText, b.photoCache.Build(mainMenuText), buildMainMenuKeyboard(showTrial))
 }
 
-func buildMainMenuKeyboard(showTrial bool) *tele.ReplyMarkup {
-	var kb tele.ReplyMarkup
-
-	rows := make([]tele.Row, 0, 4)
+func buildMainMenuKeyboard(showTrial bool) map[string]any {
+	rows := make([][]map[string]any, 0, 4)
 
 	if showTrial {
-		rows = append(rows, kb.Row(kb.Data("🎁 Попробовать бесплатно", string(actTrialActivate), "")))
+		rows = append(rows, []map[string]any{
+			iconCallbackBtn("Попробовать бесплатно", string(actTrialActivate), "", iconTrial),
+		})
 	}
 
 	rows = append(rows,
-		kb.Row(kb.Data("💳 Купить / Продлить", string(actMenuBuy), "")),
-		kb.Row(kb.Data("👤 Моя подписка", string(actMySubscription), "")),
-		kb.Row(
-			kb.Data("ℹ О нас", string(actAbout), ""),
-			kb.Data("💬 Поддержка", string(actSupport), ""),
-		),
+		[]map[string]any{iconCallbackBtn("Купить", string(actMenuBuy), "", iconBuy)},
+		[]map[string]any{iconCallbackBtn("Моя подписка", string(actMySubscription), "", iconUser)},
+		[]map[string]any{
+			iconCallbackBtn("О нас", string(actAbout), "", iconAbout),
+			iconCallbackBtn("Поддержка", string(actSupport), "", iconSupport),
+		},
 	)
 
-	kb.Inline(rows...)
-	return &kb
-}
-
-func (b *Bot) editOrSend(c tele.Context, text string, kb *tele.ReplyMarkup, opts ...interface{}) error {
-	args := make([]interface{}, 0, len(opts)+1)
-	if kb != nil {
-		args = append(args, kb)
-	}
-	args = append(args, opts...)
-
-	if c.Callback() != nil {
-		// Photo messages must use editMessageCaption; text messages must use editMessageText.
-		// Try caption first (main menu / any screen sent as photo), fall back to text edit.
-		if err := c.EditCaption(text, args...); err == nil {
-			return nil
-		}
-		if err := c.Edit(text, args...); err == nil {
-			return nil
-		}
-	}
-
-	photo := b.photoCache.Build(text)
-	if photo == nil {
-		return c.Send(text, args...)
-	}
-	msg, err := b.bot.Send(c.Recipient(), photo, args...)
-	if err != nil {
-		// photo upload failed — last resort, send as plain text so user sees something.
-		return c.Send(text, args...)
-	}
-	b.photoCache.Capture(msg)
-	return nil
+	return iconKeyboard(rows...)
 }
 
 func (b *Bot) renderMySubscription(ctx context.Context, c tele.Context) error {
@@ -95,14 +64,12 @@ func (b *Bot) renderMySubscription(ctx context.Context, c tele.Context) error {
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			text := fmt.Sprintf("Привет, %s! 👋\n\nУ тебя пока нет активной подписки.", html.EscapeString(greeting))
-			var kb tele.ReplyMarkup
-			rows := []tele.Row{
-				kb.Row(kb.Data("🎁 Попробовать бесплатно", string(actTrialActivate), "")),
-				kb.Row(kb.Data("💳 Купить подписку", string(actMenuBuy), "")),
-				kb.Row(kb.Data("◀ В меню", string(actBackToMain), "")),
-			}
-			kb.Inline(rows...)
-			return b.editOrSend(c, text, &kb, tele.ModeHTML)
+			kb := iconKeyboard(
+				[]map[string]any{iconCallbackBtn("Попробовать бесплатно", string(actTrialActivate), "", iconTrial)},
+				[]map[string]any{iconCallbackBtn("Купить подписку", string(actMenuBuy), "", iconBuy)},
+				[]map[string]any{iconCallbackBtn("В меню", string(actBackToMain), "", iconHome)},
+			)
+			return b.sendOrEditIconKeyboard(c, text, nil, kb)
 		}
 		return c.Respond(&tele.CallbackResponse{Text: "Не удалось загрузить подписку", ShowAlert: true})
 	}
@@ -127,17 +94,15 @@ func (b *Bot) renderMySubscription(ctx context.Context, c tele.Context) error {
 		sb.WriteString("\n⏳ Готовим подключение. Придёт отдельным сообщением через пару секунд.")
 	}
 
-	var kb tele.ReplyMarkup
-	rows := make([]tele.Row, 0, 3)
+	rows := make([][]map[string]any, 0, 3)
 	if b.cfg.InstructionURL != "" {
-		rows = append(rows, kb.Row(kb.URL("📖 Инструкция", b.cfg.InstructionURL)))
+		rows = append(rows, []map[string]any{iconURLBtn("Инструкция", b.cfg.InstructionURL, iconInstr)})
 	}
 	rows = append(rows,
-		kb.Row(kb.Data("💳 Продлить", string(actRenewPickDuration), sub.ID)),
-		kb.Row(kb.Data("◀ В меню", string(actBackToMain), "")),
+		[]map[string]any{iconCallbackBtn("Продлить", string(actRenewPickDuration), sub.ID, iconBuy)},
+		[]map[string]any{iconCallbackBtn("В меню", string(actBackToMain), "", iconHome)},
 	)
-	kb.Inline(rows...)
-	return b.editOrSend(c, sb.String(), &kb, tele.ModeHTML)
+	return b.sendOrEditIconKeyboard(c, sb.String(), nil, iconKeyboard(rows...))
 }
 
 func (b *Bot) renderAbout(c tele.Context) error {
@@ -145,24 +110,22 @@ func (b *Bot) renderAbout(c tele.Context) error {
 	if text == "" {
 		text = "Wind-Walker VPN — быстрый и надёжный VPN-сервис."
 	}
-	var kb tele.ReplyMarkup
-	kb.Inline(
-		kb.Row(kb.URL("🔒 Политика конфиденциальности", "https://telegra.ph/Politika-konfidencialnosti-04-01-26")),
-		kb.Row(kb.URL("📄 Пользовательское соглашение", "https://telegra.ph/Polzovatelskoe-soglashenie-04-01-19")),
-		kb.Row(kb.Data("◀ В меню", string(actBackToMain), "")),
+	kb := iconKeyboard(
+		[]map[string]any{iconURLBtn("Политика конфиденциальности", "https://telegra.ph/Politika-konfidencialnosti-04-01-26", iconLock)},
+		[]map[string]any{iconURLBtn("Пользовательское соглашение", "https://telegra.ph/Polzovatelskoe-soglashenie-04-01-19", iconAgreement)},
+		[]map[string]any{iconCallbackBtn("В меню", string(actBackToMain), "", iconHome)},
 	)
-	return b.editOrSend(c, text, &kb)
+	return b.sendOrEditIconKeyboard(c, text, nil, kb)
 }
 
 func (b *Bot) renderSupport(c tele.Context) error {
 	username := strings.TrimPrefix(b.cfg.SupportUsername, "@")
 	text := fmt.Sprintf("По любым вопросам пиши @%s", username)
-	var kb tele.ReplyMarkup
-	kb.Inline(
-		kb.Row(kb.URL("Открыть чат поддержки", "https://t.me/"+username)),
-		kb.Row(kb.Data("◀ В меню", string(actBackToMain), "")),
+	kb := iconKeyboard(
+		[]map[string]any{iconURLBtn("Открыть чат поддержки", "https://t.me/"+username, "")},
+		[]map[string]any{iconCallbackBtn("В меню", string(actBackToMain), "", iconHome)},
 	)
-	return b.editOrSend(c, text, &kb)
+	return b.sendOrEditIconKeyboard(c, text, nil, kb)
 }
 
 func senderGreeting(c tele.Context) string {

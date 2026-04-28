@@ -3,7 +3,6 @@ package bot
 import (
 	"control-plane/internal/model"
 	"fmt"
-	tele "gopkg.in/telebot.v4"
 	"sort"
 	"strings"
 )
@@ -36,7 +35,7 @@ func regionLabel(code string) string {
 	return strings.ToUpper(code)
 }
 
-func buildRegionBtns(plans []*model.Plan) *tele.ReplyMarkup {
+func buildRegionBtns(plans []*model.Plan) map[string]any {
 	set := map[string]struct{}{}
 	for _, p := range plans {
 		if p.Archived {
@@ -56,23 +55,20 @@ func buildRegionBtns(plans []*model.Plan) *tele.ReplyMarkup {
 	}
 	sort.Strings(regions)
 
-	var kb tele.ReplyMarkup
-	var rows []tele.Row
-	row := make([]tele.Btn, 0, 3)
+	var rows [][]map[string]any
+	row := make([]map[string]any, 0, 3)
 	for i, region := range regions {
-		btn := kb.Data(regionLabel(region), string(actPickRegion), region) // Unique = действие, Data = region
-		row = append(row, btn)
+		row = append(row, iconCallbackBtn(regionLabel(region), string(actPickRegion), region, ""))
 		if len(row) == 3 || i == len(regions)-1 {
-			rows = append(rows, kb.Row(row...))
-			row = row[:0]
+			rows = append(rows, row)
+			row = make([]map[string]any, 0, 3)
 		}
 	}
-	rows = append(rows, kb.Row(kb.Data("◀ В меню", string(actBackToMain), "")))
-	kb.Inline(rows...)
-	return &kb
+	rows = append(rows, []map[string]any{iconCallbackBtn("В меню", string(actBackToMain), "", iconHome)})
+	return iconKeyboard(rows...)
 }
 
-func buildProtocolBtns(plans []*model.Plan, region string) *tele.ReplyMarkup {
+func buildProtocolBtns(plans []*model.Plan, region string) map[string]any {
 	set := map[string]struct{}{}
 	for _, p := range plans {
 		if p.Archived || p.Region != region {
@@ -92,27 +88,23 @@ func buildProtocolBtns(plans []*model.Plan, region string) *tele.ReplyMarkup {
 	}
 	sort.Strings(protos)
 
-	var kb tele.ReplyMarkup
-	// back к регионам
-	btnBack := kb.Data("⬅ Back to regions", string(actPickRegion), "__back__")
-
-	rows := []tele.Row{kb.Row(btnBack)}
-	row := make([]tele.Btn, 0, 3)
+	rows := [][]map[string]any{
+		{iconCallbackBtn("Back to regions", string(actPickRegion), "__back__", iconBack)},
+	}
+	row := make([]map[string]any, 0, 3)
 	for i, pr := range protos {
-		btn := kb.Data(strings.ToUpper(pr), string(actPickProtocol), pr)
-		row = append(row, btn)
+		row = append(row, iconCallbackBtn(strings.ToUpper(pr), string(actPickProtocol), pr, ""))
 		if len(row) == 3 || i == len(protos)-1 {
-			rows = append(rows, kb.Row(row...))
-			row = row[:0]
+			rows = append(rows, row)
+			row = make([]map[string]any, 0, 3)
 		}
 	}
-	rows = append(rows, kb.Row(kb.Data("◀ В меню", string(actBackToMain), "")))
-	kb.Inline(rows...)
-	return &kb
+	rows = append(rows, []map[string]any{iconCallbackBtn("В меню", string(actBackToMain), "", iconHome)})
+	return iconKeyboard(rows...)
 }
 
 // One in row
-func buildDurationBtns(plans []*model.Plan, region, proto string) *tele.ReplyMarkup {
+func buildDurationBtns(plans []*model.Plan, region, proto string) map[string]any {
 	filtered := make([]*model.Plan, 0)
 	for _, p := range plans {
 		if p.Archived {
@@ -130,33 +122,29 @@ func buildDurationBtns(plans []*model.Plan, region, proto string) *tele.ReplyMar
 		return filtered[i].Money.Amount < filtered[j].Money.Amount
 	})
 
-	var kb tele.ReplyMarkup
-	btnBack := kb.Data("⬅ Back to protocols", string(actPickProtocol), "__back__")
-
-	rows := []tele.Row{kb.Row(btnBack)}
+	rows := [][]map[string]any{
+		{iconCallbackBtn("Back to protocols", string(actPickProtocol), "__back__", iconBack)},
+	}
 	for _, p := range filtered {
 		title := fmt.Sprintf("%s — %d %s", p.Name, p.Money.Amount, p.Money.Curr)
-		rows = append(rows, kb.Row(kb.Data(title, string(actPickDuration), p.ID)))
+		rows = append(rows, []map[string]any{iconCallbackBtn(title, string(actPickDuration), p.ID, "")})
 	}
-	rows = append(rows, kb.Row(kb.Data("◀ В меню", string(actBackToMain), "")))
-	kb.Inline(rows...)
-	return &kb
+	rows = append(rows, []map[string]any{iconCallbackBtn("В меню", string(actBackToMain), "", iconHome)})
+	return iconKeyboard(rows...)
 }
 
-func buildPaymentMethodBtns(methods []*model.PaymentMethod, planID string) *tele.ReplyMarkup {
-	var kb tele.ReplyMarkup
-	rows := []tele.Row{
-		kb.Row(kb.Data("⬅ Back to durations", string(actPickDuration), "__back__")),
+func buildPaymentMethodBtns(methods []*model.PaymentMethod, planID string) map[string]any {
+	rows := [][]map[string]any{
+		{iconCallbackBtn("Back to durations", string(actPickDuration), "__back__", iconBack)},
 	}
 
 	for _, method := range methods {
 		payload := packMethodPayload(method.ID, planID)
-		rows = append(rows, kb.Row(kb.Data(method.Name, string(actPickPaymentMethod), payload)))
+		rows = append(rows, []map[string]any{iconCallbackBtn(method.Name, string(actPickPaymentMethod), payload, "")})
 	}
 
-	rows = append(rows, kb.Row(kb.Data("◀ В меню", string(actBackToMain), "")))
-	kb.Inline(rows...)
-	return &kb
+	rows = append(rows, []map[string]any{iconCallbackBtn("В меню", string(actBackToMain), "", iconHome)})
+	return iconKeyboard(rows...)
 }
 
 func packMethodPayload(methodID, planID string) string {

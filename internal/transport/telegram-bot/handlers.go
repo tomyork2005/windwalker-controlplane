@@ -186,7 +186,7 @@ func (b *Bot) onMenuBuy(c tele.Context, _ string) error {
 	if buttons == nil {
 		return c.Respond(&tele.CallbackResponse{Text: "Пока нет доступных регионов", ShowAlert: true})
 	}
-	return b.editOrSend(c, "Выберите регион:", buttons)
+	return b.sendOrEditIconKeyboard(c, "Выберите регион:", nil, buttons)
 }
 
 // Buy VPN steps - 1. Pick region -> 2. Pick Protocol -> 3. Pick duration 4. Pick payment method 5. Get payment link
@@ -200,9 +200,9 @@ func (b *Bot) onPickRegion(c tele.Context, region string) error {
 	if region == "__back__" {
 		buttons := buildRegionBtns(plans)
 		if buttons == nil {
-			return b.editOrSend(c, "Нет доступных регионов.", nil)
+			return b.sendOrEditIconKeyboard(c, "Нет доступных регионов.", nil, nil)
 		}
-		return b.editOrSend(c, "Выберите регион:", buttons)
+		return b.sendOrEditIconKeyboard(c, "Выберите регион:", nil, buttons)
 	}
 
 	b.state.Update(c.Sender().ID, func(current orderState, ok bool) (next orderState, keep bool) {
@@ -213,9 +213,9 @@ func (b *Bot) onPickRegion(c tele.Context, region string) error {
 
 	buttons := buildProtocolBtns(plans, region)
 	if buttons == nil {
-		return b.editOrSend(c, "В этом регионе протоколов нет. Выберите другой регион:", buildRegionBtns(plans))
+		return b.sendOrEditIconKeyboard(c, "В этом регионе протоколов нет. Выберите другой регион:", nil, buildRegionBtns(plans))
 	}
-	return b.editOrSend(c, "Выберите протокол:", buttons)
+	return b.sendOrEditIconKeyboard(c, "Выберите протокол:", nil, buttons)
 }
 
 func (b *Bot) onPickProtocol(c tele.Context, protocol string) error {
@@ -226,15 +226,15 @@ func (b *Bot) onPickProtocol(c tele.Context, protocol string) error {
 
 	st, ok := b.state.Load(c.Sender().ID)
 	if !ok || st.Region == "" {
-		return b.editOrSend(c, "Сессия истекла. Выберите регион:", buildRegionBtns(plans))
+		return b.sendOrEditIconKeyboard(c, "Сессия истекла. Выберите регион:", nil, buildRegionBtns(plans))
 	}
 
 	if protocol == "__back__" {
 		buttons := buildProtocolBtns(plans, st.Region)
 		if buttons == nil {
-			return b.editOrSend(c, "Нет доступных протоколов", nil)
+			return b.sendOrEditIconKeyboard(c, "Нет доступных протоколов", nil, nil)
 		}
-		return b.editOrSend(c, "Выберите протокол:", buttons)
+		return b.sendOrEditIconKeyboard(c, "Выберите протокол:", nil, buttons)
 	}
 
 	_, ok = b.state.Update(c.Sender().ID, func(current orderState, ok bool) (next orderState, keep bool) {
@@ -250,10 +250,10 @@ func (b *Bot) onPickProtocol(c tele.Context, protocol string) error {
 
 	buttons := buildDurationBtns(plans, st.Region, protocol)
 	if buttons == nil {
-		return b.editOrSend(c, "В этой конфигурации нет тарифов. Выберите другой протокол/регион:", buildProtocolBtns(plans, st.Region))
+		return b.sendOrEditIconKeyboard(c, "В этой конфигурации нет тарифов. Выберите другой протокол/регион:", nil, buildProtocolBtns(plans, st.Region))
 	}
 
-	return b.editOrSend(c, "Выберите длительность подписки:", buttons)
+	return b.sendOrEditIconKeyboard(c, "Выберите длительность подписки:", nil, buttons)
 }
 
 func (b *Bot) onPickDuration(c tele.Context, planID string) error {
@@ -278,13 +278,13 @@ func (b *Bot) onPickDuration(c tele.Context, planID string) error {
 	if planID == "__back__" {
 		buttons := buildDurationBtns(plans, st.Region, st.Protocol)
 		if buttons == nil {
-			return b.editOrSend(c, "Для выбранного региона и протокола тарифов нет.", nil)
+			return b.sendOrEditIconKeyboard(c, "Для выбранного региона и протокола тарифов нет.", nil, nil)
 		}
-		return b.editOrSend(c, "Выберите длительность подписки:", buttons)
+		return b.sendOrEditIconKeyboard(c, "Выберите длительность подписки:", nil, buttons)
 	}
 
 	buttons := buildPaymentMethodBtns(methods, planID)
-	return b.editOrSend(c, "Выберите способ оплаты:", buttons)
+	return b.sendOrEditIconKeyboard(c, "Выберите способ оплаты:", nil, buttons)
 }
 
 func (b *Bot) onRenewPickDuration(c tele.Context, subscriptionID string) error {
@@ -321,7 +321,7 @@ func (b *Bot) onRenewPickDuration(c tele.Context, subscriptionID string) error {
 		return c.Respond(&tele.CallbackResponse{Text: "Для продления нет доступных тарифов", ShowAlert: true})
 	}
 
-	return b.editOrSend(c, "Выберите длительность продления:", buttons)
+	return b.sendOrEditIconKeyboard(c, "Выберите длительность продления:", nil, buttons)
 }
 
 func (b *Bot) onPickPaymentMethod(c tele.Context, payload string) error {
@@ -355,15 +355,14 @@ func (b *Bot) onPickPaymentMethod(c tele.Context, payload string) error {
 		return c.Respond(&tele.CallbackResponse{Text: "Не удалось создать счёт", ShowAlert: true})
 	}
 
-	var kb tele.ReplyMarkup
-	kb.Inline(
-		kb.Row(kb.URL("Оплатить", inv.CheckoutURL)),
-		kb.Row(kb.Data("⬅ Назад", string(actBackToMain), "")),
+	kb := iconKeyboard(
+		[]map[string]any{iconURLBtn("Оплатить", inv.CheckoutURL, "")},
+		[]map[string]any{iconCallbackBtn("Назад", string(actBackToMain), "", iconBack)},
 	)
 
 	b.state.Delete(c.Sender().ID)
 
-	return b.editOrSend(c, "Счёт создан ✅\nПосле оплаты подключение придёт автоматически.", &kb)
+	return b.sendOrEditIconKeyboard(c, "Счёт создан ✅\nПосле оплаты подключение придёт автоматически.", nil, kb)
 }
 
 func (b *Bot) Run(ctx context.Context) error {
