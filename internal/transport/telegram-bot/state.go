@@ -6,8 +6,9 @@ import (
 )
 
 type orderState struct {
-	Region   string
-	Protocol string
+	Region              string
+	Protocol            string
+	RenewSubscriptionID string
 }
 
 type SafeState struct {

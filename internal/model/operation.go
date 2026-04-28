@@ -10,6 +10,7 @@ type OperationKind string
 const (
 	OpUpsert    OperationKind = "upsert"
 	OpRemove    OperationKind = "remove"
+	OpRenew     OperationKind = "renew"
 	OpStatsAll  OperationKind = "stats_all"
 	OpStatsUser OperationKind = "stats_user"
 	OpHello     OperationKind = "hello"
@@ -23,6 +24,7 @@ type Operation struct {
 
 	Upsert    *AgentUpsertPayload
 	Remove    *AgentRemovePayload
+	Renew     *AgentRenewPayload
 	StatsUser *StatsUserPayload
 }
 type AgentUpsertPayload struct {
@@ -33,6 +35,11 @@ type AgentUpsertPayload struct {
 type AgentRemovePayload struct {
 	UserID     string `json:"user_id"`
 	DriverType string `json:"driver"`
+}
+type AgentRenewPayload struct {
+	UserID     string    `json:"user_id"`
+	DriverType string    `json:"driver"`
+	ExpiresAt  time.Time `json:"expires_at"`
 }
 type StatsUserPayload struct {
 	UserID string `json:"user_id"`

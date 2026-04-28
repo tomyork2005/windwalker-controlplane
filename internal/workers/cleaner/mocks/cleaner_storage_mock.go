@@ -2,19 +2,20 @@
 
 package mocks
 
-//go:generate minimock -i control-plane/internal/workers.CleanerStorage -o cleaner_storage_mock.go -n CleanerStorageMock -p mocks
+//go:generate minimock -i control-plane/internal/workers/cleaner.CleanerStorage -o cleaner_storage_mock.go -n CleanerStorageMock -p mocks
 
 import (
 	"context"
 	"control-plane/internal/model"
 	"sync"
 	mm_atomic "sync/atomic"
+	"time"
 	mm_time "time"
 
 	"github.com/gojuno/minimock/v3"
 )
 
-// CleanerStorageMock implements mm_workers.CleanerStorage
+// CleanerStorageMock implements mm_cleaner.CleanerStorage
 type CleanerStorageMock struct {
 	t          minimock.Tester
 	finishOnce sync.Once
@@ -26,12 +27,26 @@ type CleanerStorageMock struct {
 	beforeListExpiredActiveSubsCounter uint64
 	ListExpiredActiveSubsMock          mCleanerStorageMockListExpiredActiveSubs
 
+	funcListSubsAboutToExpire          func(ctx context.Context, threshold time.Duration, limit int) (spa1 []*model.SubscriptionWithPlan, err error)
+	funcListSubsAboutToExpireOrigin    string
+	inspectFuncListSubsAboutToExpire   func(ctx context.Context, threshold time.Duration, limit int)
+	afterListSubsAboutToExpireCounter  uint64
+	beforeListSubsAboutToExpireCounter uint64
+	ListSubsAboutToExpireMock          mCleanerStorageMockListSubsAboutToExpire
+
 	funcMarkSubscriptionInactive          func(ctx context.Context, id string) (err error)
 	funcMarkSubscriptionInactiveOrigin    string
 	inspectFuncMarkSubscriptionInactive   func(ctx context.Context, id string)
 	afterMarkSubscriptionInactiveCounter  uint64
 	beforeMarkSubscriptionInactiveCounter uint64
 	MarkSubscriptionInactiveMock          mCleanerStorageMockMarkSubscriptionInactive
+
+	funcMarkSubscriptionWarned          func(ctx context.Context, id string) (err error)
+	funcMarkSubscriptionWarnedOrigin    string
+	inspectFuncMarkSubscriptionWarned   func(ctx context.Context, id string)
+	afterMarkSubscriptionWarnedCounter  uint64
+	beforeMarkSubscriptionWarnedCounter uint64
+	MarkSubscriptionWarnedMock          mCleanerStorageMockMarkSubscriptionWarned
 
 	funcSaveOutboxEvent          func(ctx context.Context, eventType string, payload any) (err error)
 	funcSaveOutboxEventOrigin    string
@@ -48,7 +63,7 @@ type CleanerStorageMock struct {
 	WithTxMock          mCleanerStorageMockWithTx
 }
 
-// NewCleanerStorageMock returns a mock for mm_workers.CleanerStorage
+// NewCleanerStorageMock returns a mock for mm_cleaner.CleanerStorage
 func NewCleanerStorageMock(t minimock.Tester) *CleanerStorageMock {
 	m := &CleanerStorageMock{t: t}
 
@@ -59,8 +74,14 @@ func NewCleanerStorageMock(t minimock.Tester) *CleanerStorageMock {
 	m.ListExpiredActiveSubsMock = mCleanerStorageMockListExpiredActiveSubs{mock: m}
 	m.ListExpiredActiveSubsMock.callArgs = []*CleanerStorageMockListExpiredActiveSubsParams{}
 
+	m.ListSubsAboutToExpireMock = mCleanerStorageMockListSubsAboutToExpire{mock: m}
+	m.ListSubsAboutToExpireMock.callArgs = []*CleanerStorageMockListSubsAboutToExpireParams{}
+
 	m.MarkSubscriptionInactiveMock = mCleanerStorageMockMarkSubscriptionInactive{mock: m}
 	m.MarkSubscriptionInactiveMock.callArgs = []*CleanerStorageMockMarkSubscriptionInactiveParams{}
+
+	m.MarkSubscriptionWarnedMock = mCleanerStorageMockMarkSubscriptionWarned{mock: m}
+	m.MarkSubscriptionWarnedMock.callArgs = []*CleanerStorageMockMarkSubscriptionWarnedParams{}
 
 	m.SaveOutboxEventMock = mCleanerStorageMockSaveOutboxEvent{mock: m}
 	m.SaveOutboxEventMock.callArgs = []*CleanerStorageMockSaveOutboxEventParams{}
@@ -286,7 +307,7 @@ func (mmListExpiredActiveSubs *mCleanerStorageMockListExpiredActiveSubs) invocat
 	return totalInvocations > 0 && (expectedInvocations == 0 || expectedInvocations == totalInvocations)
 }
 
-// ListExpiredActiveSubs implements mm_workers.CleanerStorage
+// ListExpiredActiveSubs implements mm_cleaner.CleanerStorage
 func (mmListExpiredActiveSubs *CleanerStorageMock) ListExpiredActiveSubs(ctx context.Context, limit int) (spa1 []*model.SubscriptionWithPlan, err error) {
 	mm_atomic.AddUint64(&mmListExpiredActiveSubs.beforeListExpiredActiveSubsCounter, 1)
 	defer mm_atomic.AddUint64(&mmListExpiredActiveSubs.afterListExpiredActiveSubsCounter, 1)
@@ -413,6 +434,380 @@ func (m *CleanerStorageMock) MinimockListExpiredActiveSubsInspect() {
 	if !m.ListExpiredActiveSubsMock.invocationsDone() && afterListExpiredActiveSubsCounter > 0 {
 		m.t.Errorf("Expected %d calls to CleanerStorageMock.ListExpiredActiveSubs at\n%s but found %d calls",
 			mm_atomic.LoadUint64(&m.ListExpiredActiveSubsMock.expectedInvocations), m.ListExpiredActiveSubsMock.expectedInvocationsOrigin, afterListExpiredActiveSubsCounter)
+	}
+}
+
+type mCleanerStorageMockListSubsAboutToExpire struct {
+	optional           bool
+	mock               *CleanerStorageMock
+	defaultExpectation *CleanerStorageMockListSubsAboutToExpireExpectation
+	expectations       []*CleanerStorageMockListSubsAboutToExpireExpectation
+
+	callArgs []*CleanerStorageMockListSubsAboutToExpireParams
+	mutex    sync.RWMutex
+
+	expectedInvocations       uint64
+	expectedInvocationsOrigin string
+}
+
+// CleanerStorageMockListSubsAboutToExpireExpectation specifies expectation struct of the CleanerStorage.ListSubsAboutToExpire
+type CleanerStorageMockListSubsAboutToExpireExpectation struct {
+	mock               *CleanerStorageMock
+	params             *CleanerStorageMockListSubsAboutToExpireParams
+	paramPtrs          *CleanerStorageMockListSubsAboutToExpireParamPtrs
+	expectationOrigins CleanerStorageMockListSubsAboutToExpireExpectationOrigins
+	results            *CleanerStorageMockListSubsAboutToExpireResults
+	returnOrigin       string
+	Counter            uint64
+}
+
+// CleanerStorageMockListSubsAboutToExpireParams contains parameters of the CleanerStorage.ListSubsAboutToExpire
+type CleanerStorageMockListSubsAboutToExpireParams struct {
+	ctx       context.Context
+	threshold time.Duration
+	limit     int
+}
+
+// CleanerStorageMockListSubsAboutToExpireParamPtrs contains pointers to parameters of the CleanerStorage.ListSubsAboutToExpire
+type CleanerStorageMockListSubsAboutToExpireParamPtrs struct {
+	ctx       *context.Context
+	threshold *time.Duration
+	limit     *int
+}
+
+// CleanerStorageMockListSubsAboutToExpireResults contains results of the CleanerStorage.ListSubsAboutToExpire
+type CleanerStorageMockListSubsAboutToExpireResults struct {
+	spa1 []*model.SubscriptionWithPlan
+	err  error
+}
+
+// CleanerStorageMockListSubsAboutToExpireOrigins contains origins of expectations of the CleanerStorage.ListSubsAboutToExpire
+type CleanerStorageMockListSubsAboutToExpireExpectationOrigins struct {
+	origin          string
+	originCtx       string
+	originThreshold string
+	originLimit     string
+}
+
+// Marks this method to be optional. The default behavior of any method with Return() is '1 or more', meaning
+// the test will fail minimock's automatic final call check if the mocked method was not called at least once.
+// Optional() makes method check to work in '0 or more' mode.
+// It is NOT RECOMMENDED to use this option unless you really need it, as default behaviour helps to
+// catch the problems when the expected method call is totally skipped during test run.
+func (mmListSubsAboutToExpire *mCleanerStorageMockListSubsAboutToExpire) Optional() *mCleanerStorageMockListSubsAboutToExpire {
+	mmListSubsAboutToExpire.optional = true
+	return mmListSubsAboutToExpire
+}
+
+// Expect sets up expected params for CleanerStorage.ListSubsAboutToExpire
+func (mmListSubsAboutToExpire *mCleanerStorageMockListSubsAboutToExpire) Expect(ctx context.Context, threshold time.Duration, limit int) *mCleanerStorageMockListSubsAboutToExpire {
+	if mmListSubsAboutToExpire.mock.funcListSubsAboutToExpire != nil {
+		mmListSubsAboutToExpire.mock.t.Fatalf("CleanerStorageMock.ListSubsAboutToExpire mock is already set by Set")
+	}
+
+	if mmListSubsAboutToExpire.defaultExpectation == nil {
+		mmListSubsAboutToExpire.defaultExpectation = &CleanerStorageMockListSubsAboutToExpireExpectation{}
+	}
+
+	if mmListSubsAboutToExpire.defaultExpectation.paramPtrs != nil {
+		mmListSubsAboutToExpire.mock.t.Fatalf("CleanerStorageMock.ListSubsAboutToExpire mock is already set by ExpectParams functions")
+	}
+
+	mmListSubsAboutToExpire.defaultExpectation.params = &CleanerStorageMockListSubsAboutToExpireParams{ctx, threshold, limit}
+	mmListSubsAboutToExpire.defaultExpectation.expectationOrigins.origin = minimock.CallerInfo(1)
+	for _, e := range mmListSubsAboutToExpire.expectations {
+		if minimock.Equal(e.params, mmListSubsAboutToExpire.defaultExpectation.params) {
+			mmListSubsAboutToExpire.mock.t.Fatalf("Expectation set by When has same params: %#v", *mmListSubsAboutToExpire.defaultExpectation.params)
+		}
+	}
+
+	return mmListSubsAboutToExpire
+}
+
+// ExpectCtxParam1 sets up expected param ctx for CleanerStorage.ListSubsAboutToExpire
+func (mmListSubsAboutToExpire *mCleanerStorageMockListSubsAboutToExpire) ExpectCtxParam1(ctx context.Context) *mCleanerStorageMockListSubsAboutToExpire {
+	if mmListSubsAboutToExpire.mock.funcListSubsAboutToExpire != nil {
+		mmListSubsAboutToExpire.mock.t.Fatalf("CleanerStorageMock.ListSubsAboutToExpire mock is already set by Set")
+	}
+
+	if mmListSubsAboutToExpire.defaultExpectation == nil {
+		mmListSubsAboutToExpire.defaultExpectation = &CleanerStorageMockListSubsAboutToExpireExpectation{}
+	}
+
+	if mmListSubsAboutToExpire.defaultExpectation.params != nil {
+		mmListSubsAboutToExpire.mock.t.Fatalf("CleanerStorageMock.ListSubsAboutToExpire mock is already set by Expect")
+	}
+
+	if mmListSubsAboutToExpire.defaultExpectation.paramPtrs == nil {
+		mmListSubsAboutToExpire.defaultExpectation.paramPtrs = &CleanerStorageMockListSubsAboutToExpireParamPtrs{}
+	}
+	mmListSubsAboutToExpire.defaultExpectation.paramPtrs.ctx = &ctx
+	mmListSubsAboutToExpire.defaultExpectation.expectationOrigins.originCtx = minimock.CallerInfo(1)
+
+	return mmListSubsAboutToExpire
+}
+
+// ExpectThresholdParam2 sets up expected param threshold for CleanerStorage.ListSubsAboutToExpire
+func (mmListSubsAboutToExpire *mCleanerStorageMockListSubsAboutToExpire) ExpectThresholdParam2(threshold time.Duration) *mCleanerStorageMockListSubsAboutToExpire {
+	if mmListSubsAboutToExpire.mock.funcListSubsAboutToExpire != nil {
+		mmListSubsAboutToExpire.mock.t.Fatalf("CleanerStorageMock.ListSubsAboutToExpire mock is already set by Set")
+	}
+
+	if mmListSubsAboutToExpire.defaultExpectation == nil {
+		mmListSubsAboutToExpire.defaultExpectation = &CleanerStorageMockListSubsAboutToExpireExpectation{}
+	}
+
+	if mmListSubsAboutToExpire.defaultExpectation.params != nil {
+		mmListSubsAboutToExpire.mock.t.Fatalf("CleanerStorageMock.ListSubsAboutToExpire mock is already set by Expect")
+	}
+
+	if mmListSubsAboutToExpire.defaultExpectation.paramPtrs == nil {
+		mmListSubsAboutToExpire.defaultExpectation.paramPtrs = &CleanerStorageMockListSubsAboutToExpireParamPtrs{}
+	}
+	mmListSubsAboutToExpire.defaultExpectation.paramPtrs.threshold = &threshold
+	mmListSubsAboutToExpire.defaultExpectation.expectationOrigins.originThreshold = minimock.CallerInfo(1)
+
+	return mmListSubsAboutToExpire
+}
+
+// ExpectLimitParam3 sets up expected param limit for CleanerStorage.ListSubsAboutToExpire
+func (mmListSubsAboutToExpire *mCleanerStorageMockListSubsAboutToExpire) ExpectLimitParam3(limit int) *mCleanerStorageMockListSubsAboutToExpire {
+	if mmListSubsAboutToExpire.mock.funcListSubsAboutToExpire != nil {
+		mmListSubsAboutToExpire.mock.t.Fatalf("CleanerStorageMock.ListSubsAboutToExpire mock is already set by Set")
+	}
+
+	if mmListSubsAboutToExpire.defaultExpectation == nil {
+		mmListSubsAboutToExpire.defaultExpectation = &CleanerStorageMockListSubsAboutToExpireExpectation{}
+	}
+
+	if mmListSubsAboutToExpire.defaultExpectation.params != nil {
+		mmListSubsAboutToExpire.mock.t.Fatalf("CleanerStorageMock.ListSubsAboutToExpire mock is already set by Expect")
+	}
+
+	if mmListSubsAboutToExpire.defaultExpectation.paramPtrs == nil {
+		mmListSubsAboutToExpire.defaultExpectation.paramPtrs = &CleanerStorageMockListSubsAboutToExpireParamPtrs{}
+	}
+	mmListSubsAboutToExpire.defaultExpectation.paramPtrs.limit = &limit
+	mmListSubsAboutToExpire.defaultExpectation.expectationOrigins.originLimit = minimock.CallerInfo(1)
+
+	return mmListSubsAboutToExpire
+}
+
+// Inspect accepts an inspector function that has same arguments as the CleanerStorage.ListSubsAboutToExpire
+func (mmListSubsAboutToExpire *mCleanerStorageMockListSubsAboutToExpire) Inspect(f func(ctx context.Context, threshold time.Duration, limit int)) *mCleanerStorageMockListSubsAboutToExpire {
+	if mmListSubsAboutToExpire.mock.inspectFuncListSubsAboutToExpire != nil {
+		mmListSubsAboutToExpire.mock.t.Fatalf("Inspect function is already set for CleanerStorageMock.ListSubsAboutToExpire")
+	}
+
+	mmListSubsAboutToExpire.mock.inspectFuncListSubsAboutToExpire = f
+
+	return mmListSubsAboutToExpire
+}
+
+// Return sets up results that will be returned by CleanerStorage.ListSubsAboutToExpire
+func (mmListSubsAboutToExpire *mCleanerStorageMockListSubsAboutToExpire) Return(spa1 []*model.SubscriptionWithPlan, err error) *CleanerStorageMock {
+	if mmListSubsAboutToExpire.mock.funcListSubsAboutToExpire != nil {
+		mmListSubsAboutToExpire.mock.t.Fatalf("CleanerStorageMock.ListSubsAboutToExpire mock is already set by Set")
+	}
+
+	if mmListSubsAboutToExpire.defaultExpectation == nil {
+		mmListSubsAboutToExpire.defaultExpectation = &CleanerStorageMockListSubsAboutToExpireExpectation{mock: mmListSubsAboutToExpire.mock}
+	}
+	mmListSubsAboutToExpire.defaultExpectation.results = &CleanerStorageMockListSubsAboutToExpireResults{spa1, err}
+	mmListSubsAboutToExpire.defaultExpectation.returnOrigin = minimock.CallerInfo(1)
+	return mmListSubsAboutToExpire.mock
+}
+
+// Set uses given function f to mock the CleanerStorage.ListSubsAboutToExpire method
+func (mmListSubsAboutToExpire *mCleanerStorageMockListSubsAboutToExpire) Set(f func(ctx context.Context, threshold time.Duration, limit int) (spa1 []*model.SubscriptionWithPlan, err error)) *CleanerStorageMock {
+	if mmListSubsAboutToExpire.defaultExpectation != nil {
+		mmListSubsAboutToExpire.mock.t.Fatalf("Default expectation is already set for the CleanerStorage.ListSubsAboutToExpire method")
+	}
+
+	if len(mmListSubsAboutToExpire.expectations) > 0 {
+		mmListSubsAboutToExpire.mock.t.Fatalf("Some expectations are already set for the CleanerStorage.ListSubsAboutToExpire method")
+	}
+
+	mmListSubsAboutToExpire.mock.funcListSubsAboutToExpire = f
+	mmListSubsAboutToExpire.mock.funcListSubsAboutToExpireOrigin = minimock.CallerInfo(1)
+	return mmListSubsAboutToExpire.mock
+}
+
+// When sets expectation for the CleanerStorage.ListSubsAboutToExpire which will trigger the result defined by the following
+// Then helper
+func (mmListSubsAboutToExpire *mCleanerStorageMockListSubsAboutToExpire) When(ctx context.Context, threshold time.Duration, limit int) *CleanerStorageMockListSubsAboutToExpireExpectation {
+	if mmListSubsAboutToExpire.mock.funcListSubsAboutToExpire != nil {
+		mmListSubsAboutToExpire.mock.t.Fatalf("CleanerStorageMock.ListSubsAboutToExpire mock is already set by Set")
+	}
+
+	expectation := &CleanerStorageMockListSubsAboutToExpireExpectation{
+		mock:               mmListSubsAboutToExpire.mock,
+		params:             &CleanerStorageMockListSubsAboutToExpireParams{ctx, threshold, limit},
+		expectationOrigins: CleanerStorageMockListSubsAboutToExpireExpectationOrigins{origin: minimock.CallerInfo(1)},
+	}
+	mmListSubsAboutToExpire.expectations = append(mmListSubsAboutToExpire.expectations, expectation)
+	return expectation
+}
+
+// Then sets up CleanerStorage.ListSubsAboutToExpire return parameters for the expectation previously defined by the When method
+func (e *CleanerStorageMockListSubsAboutToExpireExpectation) Then(spa1 []*model.SubscriptionWithPlan, err error) *CleanerStorageMock {
+	e.results = &CleanerStorageMockListSubsAboutToExpireResults{spa1, err}
+	return e.mock
+}
+
+// Times sets number of times CleanerStorage.ListSubsAboutToExpire should be invoked
+func (mmListSubsAboutToExpire *mCleanerStorageMockListSubsAboutToExpire) Times(n uint64) *mCleanerStorageMockListSubsAboutToExpire {
+	if n == 0 {
+		mmListSubsAboutToExpire.mock.t.Fatalf("Times of CleanerStorageMock.ListSubsAboutToExpire mock can not be zero")
+	}
+	mm_atomic.StoreUint64(&mmListSubsAboutToExpire.expectedInvocations, n)
+	mmListSubsAboutToExpire.expectedInvocationsOrigin = minimock.CallerInfo(1)
+	return mmListSubsAboutToExpire
+}
+
+func (mmListSubsAboutToExpire *mCleanerStorageMockListSubsAboutToExpire) invocationsDone() bool {
+	if len(mmListSubsAboutToExpire.expectations) == 0 && mmListSubsAboutToExpire.defaultExpectation == nil && mmListSubsAboutToExpire.mock.funcListSubsAboutToExpire == nil {
+		return true
+	}
+
+	totalInvocations := mm_atomic.LoadUint64(&mmListSubsAboutToExpire.mock.afterListSubsAboutToExpireCounter)
+	expectedInvocations := mm_atomic.LoadUint64(&mmListSubsAboutToExpire.expectedInvocations)
+
+	return totalInvocations > 0 && (expectedInvocations == 0 || expectedInvocations == totalInvocations)
+}
+
+// ListSubsAboutToExpire implements mm_cleaner.CleanerStorage
+func (mmListSubsAboutToExpire *CleanerStorageMock) ListSubsAboutToExpire(ctx context.Context, threshold time.Duration, limit int) (spa1 []*model.SubscriptionWithPlan, err error) {
+	mm_atomic.AddUint64(&mmListSubsAboutToExpire.beforeListSubsAboutToExpireCounter, 1)
+	defer mm_atomic.AddUint64(&mmListSubsAboutToExpire.afterListSubsAboutToExpireCounter, 1)
+
+	mmListSubsAboutToExpire.t.Helper()
+
+	if mmListSubsAboutToExpire.inspectFuncListSubsAboutToExpire != nil {
+		mmListSubsAboutToExpire.inspectFuncListSubsAboutToExpire(ctx, threshold, limit)
+	}
+
+	mm_params := CleanerStorageMockListSubsAboutToExpireParams{ctx, threshold, limit}
+
+	// Record call args
+	mmListSubsAboutToExpire.ListSubsAboutToExpireMock.mutex.Lock()
+	mmListSubsAboutToExpire.ListSubsAboutToExpireMock.callArgs = append(mmListSubsAboutToExpire.ListSubsAboutToExpireMock.callArgs, &mm_params)
+	mmListSubsAboutToExpire.ListSubsAboutToExpireMock.mutex.Unlock()
+
+	for _, e := range mmListSubsAboutToExpire.ListSubsAboutToExpireMock.expectations {
+		if minimock.Equal(*e.params, mm_params) {
+			mm_atomic.AddUint64(&e.Counter, 1)
+			return e.results.spa1, e.results.err
+		}
+	}
+
+	if mmListSubsAboutToExpire.ListSubsAboutToExpireMock.defaultExpectation != nil {
+		mm_atomic.AddUint64(&mmListSubsAboutToExpire.ListSubsAboutToExpireMock.defaultExpectation.Counter, 1)
+		mm_want := mmListSubsAboutToExpire.ListSubsAboutToExpireMock.defaultExpectation.params
+		mm_want_ptrs := mmListSubsAboutToExpire.ListSubsAboutToExpireMock.defaultExpectation.paramPtrs
+
+		mm_got := CleanerStorageMockListSubsAboutToExpireParams{ctx, threshold, limit}
+
+		if mm_want_ptrs != nil {
+
+			if mm_want_ptrs.ctx != nil && !minimock.Equal(*mm_want_ptrs.ctx, mm_got.ctx) {
+				mmListSubsAboutToExpire.t.Errorf("CleanerStorageMock.ListSubsAboutToExpire got unexpected parameter ctx, expected at\n%s:\nwant: %#v\n got: %#v%s\n",
+					mmListSubsAboutToExpire.ListSubsAboutToExpireMock.defaultExpectation.expectationOrigins.originCtx, *mm_want_ptrs.ctx, mm_got.ctx, minimock.Diff(*mm_want_ptrs.ctx, mm_got.ctx))
+			}
+
+			if mm_want_ptrs.threshold != nil && !minimock.Equal(*mm_want_ptrs.threshold, mm_got.threshold) {
+				mmListSubsAboutToExpire.t.Errorf("CleanerStorageMock.ListSubsAboutToExpire got unexpected parameter threshold, expected at\n%s:\nwant: %#v\n got: %#v%s\n",
+					mmListSubsAboutToExpire.ListSubsAboutToExpireMock.defaultExpectation.expectationOrigins.originThreshold, *mm_want_ptrs.threshold, mm_got.threshold, minimock.Diff(*mm_want_ptrs.threshold, mm_got.threshold))
+			}
+
+			if mm_want_ptrs.limit != nil && !minimock.Equal(*mm_want_ptrs.limit, mm_got.limit) {
+				mmListSubsAboutToExpire.t.Errorf("CleanerStorageMock.ListSubsAboutToExpire got unexpected parameter limit, expected at\n%s:\nwant: %#v\n got: %#v%s\n",
+					mmListSubsAboutToExpire.ListSubsAboutToExpireMock.defaultExpectation.expectationOrigins.originLimit, *mm_want_ptrs.limit, mm_got.limit, minimock.Diff(*mm_want_ptrs.limit, mm_got.limit))
+			}
+
+		} else if mm_want != nil && !minimock.Equal(*mm_want, mm_got) {
+			mmListSubsAboutToExpire.t.Errorf("CleanerStorageMock.ListSubsAboutToExpire got unexpected parameters, expected at\n%s:\nwant: %#v\n got: %#v%s\n",
+				mmListSubsAboutToExpire.ListSubsAboutToExpireMock.defaultExpectation.expectationOrigins.origin, *mm_want, mm_got, minimock.Diff(*mm_want, mm_got))
+		}
+
+		mm_results := mmListSubsAboutToExpire.ListSubsAboutToExpireMock.defaultExpectation.results
+		if mm_results == nil {
+			mmListSubsAboutToExpire.t.Fatal("No results are set for the CleanerStorageMock.ListSubsAboutToExpire")
+		}
+		return (*mm_results).spa1, (*mm_results).err
+	}
+	if mmListSubsAboutToExpire.funcListSubsAboutToExpire != nil {
+		return mmListSubsAboutToExpire.funcListSubsAboutToExpire(ctx, threshold, limit)
+	}
+	mmListSubsAboutToExpire.t.Fatalf("Unexpected call to CleanerStorageMock.ListSubsAboutToExpire. %v %v %v", ctx, threshold, limit)
+	return
+}
+
+// ListSubsAboutToExpireAfterCounter returns a count of finished CleanerStorageMock.ListSubsAboutToExpire invocations
+func (mmListSubsAboutToExpire *CleanerStorageMock) ListSubsAboutToExpireAfterCounter() uint64 {
+	return mm_atomic.LoadUint64(&mmListSubsAboutToExpire.afterListSubsAboutToExpireCounter)
+}
+
+// ListSubsAboutToExpireBeforeCounter returns a count of CleanerStorageMock.ListSubsAboutToExpire invocations
+func (mmListSubsAboutToExpire *CleanerStorageMock) ListSubsAboutToExpireBeforeCounter() uint64 {
+	return mm_atomic.LoadUint64(&mmListSubsAboutToExpire.beforeListSubsAboutToExpireCounter)
+}
+
+// Calls returns a list of arguments used in each call to CleanerStorageMock.ListSubsAboutToExpire.
+// The list is in the same order as the calls were made (i.e. recent calls have a higher index)
+func (mmListSubsAboutToExpire *mCleanerStorageMockListSubsAboutToExpire) Calls() []*CleanerStorageMockListSubsAboutToExpireParams {
+	mmListSubsAboutToExpire.mutex.RLock()
+
+	argCopy := make([]*CleanerStorageMockListSubsAboutToExpireParams, len(mmListSubsAboutToExpire.callArgs))
+	copy(argCopy, mmListSubsAboutToExpire.callArgs)
+
+	mmListSubsAboutToExpire.mutex.RUnlock()
+
+	return argCopy
+}
+
+// MinimockListSubsAboutToExpireDone returns true if the count of the ListSubsAboutToExpire invocations corresponds
+// the number of defined expectations
+func (m *CleanerStorageMock) MinimockListSubsAboutToExpireDone() bool {
+	if m.ListSubsAboutToExpireMock.optional {
+		// Optional methods provide '0 or more' call count restriction.
+		return true
+	}
+
+	for _, e := range m.ListSubsAboutToExpireMock.expectations {
+		if mm_atomic.LoadUint64(&e.Counter) < 1 {
+			return false
+		}
+	}
+
+	return m.ListSubsAboutToExpireMock.invocationsDone()
+}
+
+// MinimockListSubsAboutToExpireInspect logs each unmet expectation
+func (m *CleanerStorageMock) MinimockListSubsAboutToExpireInspect() {
+	for _, e := range m.ListSubsAboutToExpireMock.expectations {
+		if mm_atomic.LoadUint64(&e.Counter) < 1 {
+			m.t.Errorf("Expected call to CleanerStorageMock.ListSubsAboutToExpire at\n%s with params: %#v", e.expectationOrigins.origin, *e.params)
+		}
+	}
+
+	afterListSubsAboutToExpireCounter := mm_atomic.LoadUint64(&m.afterListSubsAboutToExpireCounter)
+	// if default expectation was set then invocations count should be greater than zero
+	if m.ListSubsAboutToExpireMock.defaultExpectation != nil && afterListSubsAboutToExpireCounter < 1 {
+		if m.ListSubsAboutToExpireMock.defaultExpectation.params == nil {
+			m.t.Errorf("Expected call to CleanerStorageMock.ListSubsAboutToExpire at\n%s", m.ListSubsAboutToExpireMock.defaultExpectation.returnOrigin)
+		} else {
+			m.t.Errorf("Expected call to CleanerStorageMock.ListSubsAboutToExpire at\n%s with params: %#v", m.ListSubsAboutToExpireMock.defaultExpectation.expectationOrigins.origin, *m.ListSubsAboutToExpireMock.defaultExpectation.params)
+		}
+	}
+	// if func was set then invocations count should be greater than zero
+	if m.funcListSubsAboutToExpire != nil && afterListSubsAboutToExpireCounter < 1 {
+		m.t.Errorf("Expected call to CleanerStorageMock.ListSubsAboutToExpire at\n%s", m.funcListSubsAboutToExpireOrigin)
+	}
+
+	if !m.ListSubsAboutToExpireMock.invocationsDone() && afterListSubsAboutToExpireCounter > 0 {
+		m.t.Errorf("Expected %d calls to CleanerStorageMock.ListSubsAboutToExpire at\n%s but found %d calls",
+			mm_atomic.LoadUint64(&m.ListSubsAboutToExpireMock.expectedInvocations), m.ListSubsAboutToExpireMock.expectedInvocationsOrigin, afterListSubsAboutToExpireCounter)
 	}
 }
 
@@ -628,7 +1023,7 @@ func (mmMarkSubscriptionInactive *mCleanerStorageMockMarkSubscriptionInactive) i
 	return totalInvocations > 0 && (expectedInvocations == 0 || expectedInvocations == totalInvocations)
 }
 
-// MarkSubscriptionInactive implements mm_workers.CleanerStorage
+// MarkSubscriptionInactive implements mm_cleaner.CleanerStorage
 func (mmMarkSubscriptionInactive *CleanerStorageMock) MarkSubscriptionInactive(ctx context.Context, id string) (err error) {
 	mm_atomic.AddUint64(&mmMarkSubscriptionInactive.beforeMarkSubscriptionInactiveCounter, 1)
 	defer mm_atomic.AddUint64(&mmMarkSubscriptionInactive.afterMarkSubscriptionInactiveCounter, 1)
@@ -755,6 +1150,348 @@ func (m *CleanerStorageMock) MinimockMarkSubscriptionInactiveInspect() {
 	if !m.MarkSubscriptionInactiveMock.invocationsDone() && afterMarkSubscriptionInactiveCounter > 0 {
 		m.t.Errorf("Expected %d calls to CleanerStorageMock.MarkSubscriptionInactive at\n%s but found %d calls",
 			mm_atomic.LoadUint64(&m.MarkSubscriptionInactiveMock.expectedInvocations), m.MarkSubscriptionInactiveMock.expectedInvocationsOrigin, afterMarkSubscriptionInactiveCounter)
+	}
+}
+
+type mCleanerStorageMockMarkSubscriptionWarned struct {
+	optional           bool
+	mock               *CleanerStorageMock
+	defaultExpectation *CleanerStorageMockMarkSubscriptionWarnedExpectation
+	expectations       []*CleanerStorageMockMarkSubscriptionWarnedExpectation
+
+	callArgs []*CleanerStorageMockMarkSubscriptionWarnedParams
+	mutex    sync.RWMutex
+
+	expectedInvocations       uint64
+	expectedInvocationsOrigin string
+}
+
+// CleanerStorageMockMarkSubscriptionWarnedExpectation specifies expectation struct of the CleanerStorage.MarkSubscriptionWarned
+type CleanerStorageMockMarkSubscriptionWarnedExpectation struct {
+	mock               *CleanerStorageMock
+	params             *CleanerStorageMockMarkSubscriptionWarnedParams
+	paramPtrs          *CleanerStorageMockMarkSubscriptionWarnedParamPtrs
+	expectationOrigins CleanerStorageMockMarkSubscriptionWarnedExpectationOrigins
+	results            *CleanerStorageMockMarkSubscriptionWarnedResults
+	returnOrigin       string
+	Counter            uint64
+}
+
+// CleanerStorageMockMarkSubscriptionWarnedParams contains parameters of the CleanerStorage.MarkSubscriptionWarned
+type CleanerStorageMockMarkSubscriptionWarnedParams struct {
+	ctx context.Context
+	id  string
+}
+
+// CleanerStorageMockMarkSubscriptionWarnedParamPtrs contains pointers to parameters of the CleanerStorage.MarkSubscriptionWarned
+type CleanerStorageMockMarkSubscriptionWarnedParamPtrs struct {
+	ctx *context.Context
+	id  *string
+}
+
+// CleanerStorageMockMarkSubscriptionWarnedResults contains results of the CleanerStorage.MarkSubscriptionWarned
+type CleanerStorageMockMarkSubscriptionWarnedResults struct {
+	err error
+}
+
+// CleanerStorageMockMarkSubscriptionWarnedOrigins contains origins of expectations of the CleanerStorage.MarkSubscriptionWarned
+type CleanerStorageMockMarkSubscriptionWarnedExpectationOrigins struct {
+	origin    string
+	originCtx string
+	originId  string
+}
+
+// Marks this method to be optional. The default behavior of any method with Return() is '1 or more', meaning
+// the test will fail minimock's automatic final call check if the mocked method was not called at least once.
+// Optional() makes method check to work in '0 or more' mode.
+// It is NOT RECOMMENDED to use this option unless you really need it, as default behaviour helps to
+// catch the problems when the expected method call is totally skipped during test run.
+func (mmMarkSubscriptionWarned *mCleanerStorageMockMarkSubscriptionWarned) Optional() *mCleanerStorageMockMarkSubscriptionWarned {
+	mmMarkSubscriptionWarned.optional = true
+	return mmMarkSubscriptionWarned
+}
+
+// Expect sets up expected params for CleanerStorage.MarkSubscriptionWarned
+func (mmMarkSubscriptionWarned *mCleanerStorageMockMarkSubscriptionWarned) Expect(ctx context.Context, id string) *mCleanerStorageMockMarkSubscriptionWarned {
+	if mmMarkSubscriptionWarned.mock.funcMarkSubscriptionWarned != nil {
+		mmMarkSubscriptionWarned.mock.t.Fatalf("CleanerStorageMock.MarkSubscriptionWarned mock is already set by Set")
+	}
+
+	if mmMarkSubscriptionWarned.defaultExpectation == nil {
+		mmMarkSubscriptionWarned.defaultExpectation = &CleanerStorageMockMarkSubscriptionWarnedExpectation{}
+	}
+
+	if mmMarkSubscriptionWarned.defaultExpectation.paramPtrs != nil {
+		mmMarkSubscriptionWarned.mock.t.Fatalf("CleanerStorageMock.MarkSubscriptionWarned mock is already set by ExpectParams functions")
+	}
+
+	mmMarkSubscriptionWarned.defaultExpectation.params = &CleanerStorageMockMarkSubscriptionWarnedParams{ctx, id}
+	mmMarkSubscriptionWarned.defaultExpectation.expectationOrigins.origin = minimock.CallerInfo(1)
+	for _, e := range mmMarkSubscriptionWarned.expectations {
+		if minimock.Equal(e.params, mmMarkSubscriptionWarned.defaultExpectation.params) {
+			mmMarkSubscriptionWarned.mock.t.Fatalf("Expectation set by When has same params: %#v", *mmMarkSubscriptionWarned.defaultExpectation.params)
+		}
+	}
+
+	return mmMarkSubscriptionWarned
+}
+
+// ExpectCtxParam1 sets up expected param ctx for CleanerStorage.MarkSubscriptionWarned
+func (mmMarkSubscriptionWarned *mCleanerStorageMockMarkSubscriptionWarned) ExpectCtxParam1(ctx context.Context) *mCleanerStorageMockMarkSubscriptionWarned {
+	if mmMarkSubscriptionWarned.mock.funcMarkSubscriptionWarned != nil {
+		mmMarkSubscriptionWarned.mock.t.Fatalf("CleanerStorageMock.MarkSubscriptionWarned mock is already set by Set")
+	}
+
+	if mmMarkSubscriptionWarned.defaultExpectation == nil {
+		mmMarkSubscriptionWarned.defaultExpectation = &CleanerStorageMockMarkSubscriptionWarnedExpectation{}
+	}
+
+	if mmMarkSubscriptionWarned.defaultExpectation.params != nil {
+		mmMarkSubscriptionWarned.mock.t.Fatalf("CleanerStorageMock.MarkSubscriptionWarned mock is already set by Expect")
+	}
+
+	if mmMarkSubscriptionWarned.defaultExpectation.paramPtrs == nil {
+		mmMarkSubscriptionWarned.defaultExpectation.paramPtrs = &CleanerStorageMockMarkSubscriptionWarnedParamPtrs{}
+	}
+	mmMarkSubscriptionWarned.defaultExpectation.paramPtrs.ctx = &ctx
+	mmMarkSubscriptionWarned.defaultExpectation.expectationOrigins.originCtx = minimock.CallerInfo(1)
+
+	return mmMarkSubscriptionWarned
+}
+
+// ExpectIdParam2 sets up expected param id for CleanerStorage.MarkSubscriptionWarned
+func (mmMarkSubscriptionWarned *mCleanerStorageMockMarkSubscriptionWarned) ExpectIdParam2(id string) *mCleanerStorageMockMarkSubscriptionWarned {
+	if mmMarkSubscriptionWarned.mock.funcMarkSubscriptionWarned != nil {
+		mmMarkSubscriptionWarned.mock.t.Fatalf("CleanerStorageMock.MarkSubscriptionWarned mock is already set by Set")
+	}
+
+	if mmMarkSubscriptionWarned.defaultExpectation == nil {
+		mmMarkSubscriptionWarned.defaultExpectation = &CleanerStorageMockMarkSubscriptionWarnedExpectation{}
+	}
+
+	if mmMarkSubscriptionWarned.defaultExpectation.params != nil {
+		mmMarkSubscriptionWarned.mock.t.Fatalf("CleanerStorageMock.MarkSubscriptionWarned mock is already set by Expect")
+	}
+
+	if mmMarkSubscriptionWarned.defaultExpectation.paramPtrs == nil {
+		mmMarkSubscriptionWarned.defaultExpectation.paramPtrs = &CleanerStorageMockMarkSubscriptionWarnedParamPtrs{}
+	}
+	mmMarkSubscriptionWarned.defaultExpectation.paramPtrs.id = &id
+	mmMarkSubscriptionWarned.defaultExpectation.expectationOrigins.originId = minimock.CallerInfo(1)
+
+	return mmMarkSubscriptionWarned
+}
+
+// Inspect accepts an inspector function that has same arguments as the CleanerStorage.MarkSubscriptionWarned
+func (mmMarkSubscriptionWarned *mCleanerStorageMockMarkSubscriptionWarned) Inspect(f func(ctx context.Context, id string)) *mCleanerStorageMockMarkSubscriptionWarned {
+	if mmMarkSubscriptionWarned.mock.inspectFuncMarkSubscriptionWarned != nil {
+		mmMarkSubscriptionWarned.mock.t.Fatalf("Inspect function is already set for CleanerStorageMock.MarkSubscriptionWarned")
+	}
+
+	mmMarkSubscriptionWarned.mock.inspectFuncMarkSubscriptionWarned = f
+
+	return mmMarkSubscriptionWarned
+}
+
+// Return sets up results that will be returned by CleanerStorage.MarkSubscriptionWarned
+func (mmMarkSubscriptionWarned *mCleanerStorageMockMarkSubscriptionWarned) Return(err error) *CleanerStorageMock {
+	if mmMarkSubscriptionWarned.mock.funcMarkSubscriptionWarned != nil {
+		mmMarkSubscriptionWarned.mock.t.Fatalf("CleanerStorageMock.MarkSubscriptionWarned mock is already set by Set")
+	}
+
+	if mmMarkSubscriptionWarned.defaultExpectation == nil {
+		mmMarkSubscriptionWarned.defaultExpectation = &CleanerStorageMockMarkSubscriptionWarnedExpectation{mock: mmMarkSubscriptionWarned.mock}
+	}
+	mmMarkSubscriptionWarned.defaultExpectation.results = &CleanerStorageMockMarkSubscriptionWarnedResults{err}
+	mmMarkSubscriptionWarned.defaultExpectation.returnOrigin = minimock.CallerInfo(1)
+	return mmMarkSubscriptionWarned.mock
+}
+
+// Set uses given function f to mock the CleanerStorage.MarkSubscriptionWarned method
+func (mmMarkSubscriptionWarned *mCleanerStorageMockMarkSubscriptionWarned) Set(f func(ctx context.Context, id string) (err error)) *CleanerStorageMock {
+	if mmMarkSubscriptionWarned.defaultExpectation != nil {
+		mmMarkSubscriptionWarned.mock.t.Fatalf("Default expectation is already set for the CleanerStorage.MarkSubscriptionWarned method")
+	}
+
+	if len(mmMarkSubscriptionWarned.expectations) > 0 {
+		mmMarkSubscriptionWarned.mock.t.Fatalf("Some expectations are already set for the CleanerStorage.MarkSubscriptionWarned method")
+	}
+
+	mmMarkSubscriptionWarned.mock.funcMarkSubscriptionWarned = f
+	mmMarkSubscriptionWarned.mock.funcMarkSubscriptionWarnedOrigin = minimock.CallerInfo(1)
+	return mmMarkSubscriptionWarned.mock
+}
+
+// When sets expectation for the CleanerStorage.MarkSubscriptionWarned which will trigger the result defined by the following
+// Then helper
+func (mmMarkSubscriptionWarned *mCleanerStorageMockMarkSubscriptionWarned) When(ctx context.Context, id string) *CleanerStorageMockMarkSubscriptionWarnedExpectation {
+	if mmMarkSubscriptionWarned.mock.funcMarkSubscriptionWarned != nil {
+		mmMarkSubscriptionWarned.mock.t.Fatalf("CleanerStorageMock.MarkSubscriptionWarned mock is already set by Set")
+	}
+
+	expectation := &CleanerStorageMockMarkSubscriptionWarnedExpectation{
+		mock:               mmMarkSubscriptionWarned.mock,
+		params:             &CleanerStorageMockMarkSubscriptionWarnedParams{ctx, id},
+		expectationOrigins: CleanerStorageMockMarkSubscriptionWarnedExpectationOrigins{origin: minimock.CallerInfo(1)},
+	}
+	mmMarkSubscriptionWarned.expectations = append(mmMarkSubscriptionWarned.expectations, expectation)
+	return expectation
+}
+
+// Then sets up CleanerStorage.MarkSubscriptionWarned return parameters for the expectation previously defined by the When method
+func (e *CleanerStorageMockMarkSubscriptionWarnedExpectation) Then(err error) *CleanerStorageMock {
+	e.results = &CleanerStorageMockMarkSubscriptionWarnedResults{err}
+	return e.mock
+}
+
+// Times sets number of times CleanerStorage.MarkSubscriptionWarned should be invoked
+func (mmMarkSubscriptionWarned *mCleanerStorageMockMarkSubscriptionWarned) Times(n uint64) *mCleanerStorageMockMarkSubscriptionWarned {
+	if n == 0 {
+		mmMarkSubscriptionWarned.mock.t.Fatalf("Times of CleanerStorageMock.MarkSubscriptionWarned mock can not be zero")
+	}
+	mm_atomic.StoreUint64(&mmMarkSubscriptionWarned.expectedInvocations, n)
+	mmMarkSubscriptionWarned.expectedInvocationsOrigin = minimock.CallerInfo(1)
+	return mmMarkSubscriptionWarned
+}
+
+func (mmMarkSubscriptionWarned *mCleanerStorageMockMarkSubscriptionWarned) invocationsDone() bool {
+	if len(mmMarkSubscriptionWarned.expectations) == 0 && mmMarkSubscriptionWarned.defaultExpectation == nil && mmMarkSubscriptionWarned.mock.funcMarkSubscriptionWarned == nil {
+		return true
+	}
+
+	totalInvocations := mm_atomic.LoadUint64(&mmMarkSubscriptionWarned.mock.afterMarkSubscriptionWarnedCounter)
+	expectedInvocations := mm_atomic.LoadUint64(&mmMarkSubscriptionWarned.expectedInvocations)
+
+	return totalInvocations > 0 && (expectedInvocations == 0 || expectedInvocations == totalInvocations)
+}
+
+// MarkSubscriptionWarned implements mm_cleaner.CleanerStorage
+func (mmMarkSubscriptionWarned *CleanerStorageMock) MarkSubscriptionWarned(ctx context.Context, id string) (err error) {
+	mm_atomic.AddUint64(&mmMarkSubscriptionWarned.beforeMarkSubscriptionWarnedCounter, 1)
+	defer mm_atomic.AddUint64(&mmMarkSubscriptionWarned.afterMarkSubscriptionWarnedCounter, 1)
+
+	mmMarkSubscriptionWarned.t.Helper()
+
+	if mmMarkSubscriptionWarned.inspectFuncMarkSubscriptionWarned != nil {
+		mmMarkSubscriptionWarned.inspectFuncMarkSubscriptionWarned(ctx, id)
+	}
+
+	mm_params := CleanerStorageMockMarkSubscriptionWarnedParams{ctx, id}
+
+	// Record call args
+	mmMarkSubscriptionWarned.MarkSubscriptionWarnedMock.mutex.Lock()
+	mmMarkSubscriptionWarned.MarkSubscriptionWarnedMock.callArgs = append(mmMarkSubscriptionWarned.MarkSubscriptionWarnedMock.callArgs, &mm_params)
+	mmMarkSubscriptionWarned.MarkSubscriptionWarnedMock.mutex.Unlock()
+
+	for _, e := range mmMarkSubscriptionWarned.MarkSubscriptionWarnedMock.expectations {
+		if minimock.Equal(*e.params, mm_params) {
+			mm_atomic.AddUint64(&e.Counter, 1)
+			return e.results.err
+		}
+	}
+
+	if mmMarkSubscriptionWarned.MarkSubscriptionWarnedMock.defaultExpectation != nil {
+		mm_atomic.AddUint64(&mmMarkSubscriptionWarned.MarkSubscriptionWarnedMock.defaultExpectation.Counter, 1)
+		mm_want := mmMarkSubscriptionWarned.MarkSubscriptionWarnedMock.defaultExpectation.params
+		mm_want_ptrs := mmMarkSubscriptionWarned.MarkSubscriptionWarnedMock.defaultExpectation.paramPtrs
+
+		mm_got := CleanerStorageMockMarkSubscriptionWarnedParams{ctx, id}
+
+		if mm_want_ptrs != nil {
+
+			if mm_want_ptrs.ctx != nil && !minimock.Equal(*mm_want_ptrs.ctx, mm_got.ctx) {
+				mmMarkSubscriptionWarned.t.Errorf("CleanerStorageMock.MarkSubscriptionWarned got unexpected parameter ctx, expected at\n%s:\nwant: %#v\n got: %#v%s\n",
+					mmMarkSubscriptionWarned.MarkSubscriptionWarnedMock.defaultExpectation.expectationOrigins.originCtx, *mm_want_ptrs.ctx, mm_got.ctx, minimock.Diff(*mm_want_ptrs.ctx, mm_got.ctx))
+			}
+
+			if mm_want_ptrs.id != nil && !minimock.Equal(*mm_want_ptrs.id, mm_got.id) {
+				mmMarkSubscriptionWarned.t.Errorf("CleanerStorageMock.MarkSubscriptionWarned got unexpected parameter id, expected at\n%s:\nwant: %#v\n got: %#v%s\n",
+					mmMarkSubscriptionWarned.MarkSubscriptionWarnedMock.defaultExpectation.expectationOrigins.originId, *mm_want_ptrs.id, mm_got.id, minimock.Diff(*mm_want_ptrs.id, mm_got.id))
+			}
+
+		} else if mm_want != nil && !minimock.Equal(*mm_want, mm_got) {
+			mmMarkSubscriptionWarned.t.Errorf("CleanerStorageMock.MarkSubscriptionWarned got unexpected parameters, expected at\n%s:\nwant: %#v\n got: %#v%s\n",
+				mmMarkSubscriptionWarned.MarkSubscriptionWarnedMock.defaultExpectation.expectationOrigins.origin, *mm_want, mm_got, minimock.Diff(*mm_want, mm_got))
+		}
+
+		mm_results := mmMarkSubscriptionWarned.MarkSubscriptionWarnedMock.defaultExpectation.results
+		if mm_results == nil {
+			mmMarkSubscriptionWarned.t.Fatal("No results are set for the CleanerStorageMock.MarkSubscriptionWarned")
+		}
+		return (*mm_results).err
+	}
+	if mmMarkSubscriptionWarned.funcMarkSubscriptionWarned != nil {
+		return mmMarkSubscriptionWarned.funcMarkSubscriptionWarned(ctx, id)
+	}
+	mmMarkSubscriptionWarned.t.Fatalf("Unexpected call to CleanerStorageMock.MarkSubscriptionWarned. %v %v", ctx, id)
+	return
+}
+
+// MarkSubscriptionWarnedAfterCounter returns a count of finished CleanerStorageMock.MarkSubscriptionWarned invocations
+func (mmMarkSubscriptionWarned *CleanerStorageMock) MarkSubscriptionWarnedAfterCounter() uint64 {
+	return mm_atomic.LoadUint64(&mmMarkSubscriptionWarned.afterMarkSubscriptionWarnedCounter)
+}
+
+// MarkSubscriptionWarnedBeforeCounter returns a count of CleanerStorageMock.MarkSubscriptionWarned invocations
+func (mmMarkSubscriptionWarned *CleanerStorageMock) MarkSubscriptionWarnedBeforeCounter() uint64 {
+	return mm_atomic.LoadUint64(&mmMarkSubscriptionWarned.beforeMarkSubscriptionWarnedCounter)
+}
+
+// Calls returns a list of arguments used in each call to CleanerStorageMock.MarkSubscriptionWarned.
+// The list is in the same order as the calls were made (i.e. recent calls have a higher index)
+func (mmMarkSubscriptionWarned *mCleanerStorageMockMarkSubscriptionWarned) Calls() []*CleanerStorageMockMarkSubscriptionWarnedParams {
+	mmMarkSubscriptionWarned.mutex.RLock()
+
+	argCopy := make([]*CleanerStorageMockMarkSubscriptionWarnedParams, len(mmMarkSubscriptionWarned.callArgs))
+	copy(argCopy, mmMarkSubscriptionWarned.callArgs)
+
+	mmMarkSubscriptionWarned.mutex.RUnlock()
+
+	return argCopy
+}
+
+// MinimockMarkSubscriptionWarnedDone returns true if the count of the MarkSubscriptionWarned invocations corresponds
+// the number of defined expectations
+func (m *CleanerStorageMock) MinimockMarkSubscriptionWarnedDone() bool {
+	if m.MarkSubscriptionWarnedMock.optional {
+		// Optional methods provide '0 or more' call count restriction.
+		return true
+	}
+
+	for _, e := range m.MarkSubscriptionWarnedMock.expectations {
+		if mm_atomic.LoadUint64(&e.Counter) < 1 {
+			return false
+		}
+	}
+
+	return m.MarkSubscriptionWarnedMock.invocationsDone()
+}
+
+// MinimockMarkSubscriptionWarnedInspect logs each unmet expectation
+func (m *CleanerStorageMock) MinimockMarkSubscriptionWarnedInspect() {
+	for _, e := range m.MarkSubscriptionWarnedMock.expectations {
+		if mm_atomic.LoadUint64(&e.Counter) < 1 {
+			m.t.Errorf("Expected call to CleanerStorageMock.MarkSubscriptionWarned at\n%s with params: %#v", e.expectationOrigins.origin, *e.params)
+		}
+	}
+
+	afterMarkSubscriptionWarnedCounter := mm_atomic.LoadUint64(&m.afterMarkSubscriptionWarnedCounter)
+	// if default expectation was set then invocations count should be greater than zero
+	if m.MarkSubscriptionWarnedMock.defaultExpectation != nil && afterMarkSubscriptionWarnedCounter < 1 {
+		if m.MarkSubscriptionWarnedMock.defaultExpectation.params == nil {
+			m.t.Errorf("Expected call to CleanerStorageMock.MarkSubscriptionWarned at\n%s", m.MarkSubscriptionWarnedMock.defaultExpectation.returnOrigin)
+		} else {
+			m.t.Errorf("Expected call to CleanerStorageMock.MarkSubscriptionWarned at\n%s with params: %#v", m.MarkSubscriptionWarnedMock.defaultExpectation.expectationOrigins.origin, *m.MarkSubscriptionWarnedMock.defaultExpectation.params)
+		}
+	}
+	// if func was set then invocations count should be greater than zero
+	if m.funcMarkSubscriptionWarned != nil && afterMarkSubscriptionWarnedCounter < 1 {
+		m.t.Errorf("Expected call to CleanerStorageMock.MarkSubscriptionWarned at\n%s", m.funcMarkSubscriptionWarnedOrigin)
+	}
+
+	if !m.MarkSubscriptionWarnedMock.invocationsDone() && afterMarkSubscriptionWarnedCounter > 0 {
+		m.t.Errorf("Expected %d calls to CleanerStorageMock.MarkSubscriptionWarned at\n%s but found %d calls",
+			mm_atomic.LoadUint64(&m.MarkSubscriptionWarnedMock.expectedInvocations), m.MarkSubscriptionWarnedMock.expectedInvocationsOrigin, afterMarkSubscriptionWarnedCounter)
 	}
 }
 
@@ -996,7 +1733,7 @@ func (mmSaveOutboxEvent *mCleanerStorageMockSaveOutboxEvent) invocationsDone() b
 	return totalInvocations > 0 && (expectedInvocations == 0 || expectedInvocations == totalInvocations)
 }
 
-// SaveOutboxEvent implements mm_workers.CleanerStorage
+// SaveOutboxEvent implements mm_cleaner.CleanerStorage
 func (mmSaveOutboxEvent *CleanerStorageMock) SaveOutboxEvent(ctx context.Context, eventType string, payload any) (err error) {
 	mm_atomic.AddUint64(&mmSaveOutboxEvent.beforeSaveOutboxEventCounter, 1)
 	defer mm_atomic.AddUint64(&mmSaveOutboxEvent.afterSaveOutboxEventCounter, 1)
@@ -1343,7 +2080,7 @@ func (mmWithTx *mCleanerStorageMockWithTx) invocationsDone() bool {
 	return totalInvocations > 0 && (expectedInvocations == 0 || expectedInvocations == totalInvocations)
 }
 
-// WithTx implements mm_workers.CleanerStorage
+// WithTx implements mm_cleaner.CleanerStorage
 func (mmWithTx *CleanerStorageMock) WithTx(ctx context.Context, fn func(ctx context.Context) error) (err error) {
 	mm_atomic.AddUint64(&mmWithTx.beforeWithTxCounter, 1)
 	defer mm_atomic.AddUint64(&mmWithTx.afterWithTxCounter, 1)
@@ -1479,7 +2216,11 @@ func (m *CleanerStorageMock) MinimockFinish() {
 		if !m.minimockDone() {
 			m.MinimockListExpiredActiveSubsInspect()
 
+			m.MinimockListSubsAboutToExpireInspect()
+
 			m.MinimockMarkSubscriptionInactiveInspect()
+
+			m.MinimockMarkSubscriptionWarnedInspect()
 
 			m.MinimockSaveOutboxEventInspect()
 
@@ -1508,7 +2249,9 @@ func (m *CleanerStorageMock) minimockDone() bool {
 	done := true
 	return done &&
 		m.MinimockListExpiredActiveSubsDone() &&
+		m.MinimockListSubsAboutToExpireDone() &&
 		m.MinimockMarkSubscriptionInactiveDone() &&
+		m.MinimockMarkSubscriptionWarnedDone() &&
 		m.MinimockSaveOutboxEventDone() &&
 		m.MinimockWithTxDone()
 }

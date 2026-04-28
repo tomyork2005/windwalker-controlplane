@@ -25,6 +25,9 @@ type ProcessStorage interface {
 	UpdateInvoice(ctx context.Context, invoice *model.Invoice) error
 	CreateSubscription(ctx context.Context, sub *model.Subscription) error
 
+	GetSubscriptionByIDForUpdate(ctx context.Context, id string) (*model.SubscriptionWithPlan, error)
+	ExtendSubscriptionEndAt(ctx context.Context, id string, newEndAt time.Time) error
+
 	WithTx(ctx context.Context, fn func(ctx context.Context) error) error
 }
 
@@ -81,36 +84,83 @@ func (s *ProcessService) ProcessPaymentCallback(ctx context.Context, req model.C
 			return err
 		}
 
-		plan, err := s.storage.GetPlanByID(ctx, inv.PlanID)
-		if err != nil {
-			return err
+		if inv.RenewsSubscriptionID != nil {
+			return s.processRenewal(ctx, inv)
 		}
 
-		sub := &model.Subscription{
-			ID:        uuid.NewString(),
-			UserID:    inv.UserID,
-			InvoiceID: &inv.ID,
-			PlanID:    plan.ID,
-			ChatID:    inv.ChatID,
-			Status:    model.ActiveSubscriptionStatus,
-			StartAt:   time.Now().UTC(),
-			EndAt:     time.Now().UTC().AddDate(0, 0, int(plan.DurationDays)),
-		}
-		if err := s.storage.CreateSubscription(ctx, sub); err != nil {
-			return err
-		}
-
-		event := model.SubscriptionActivatedEvent{
-			UserID:            sub.UserID,
-			Region:            plan.Region,
-			DriverType:        plan.DriverType,
-			SubscribeDuration: time.Hour * time.Duration(24*plan.DurationDays),
-			SubscriptionID:    sub.ID,
-		}
-		if err = s.outbox.SaveOutboxEvent(ctx, model.EventTypeSubscriptionActivated, event); err != nil {
-			return err
-		}
-
-		return nil
+		return s.processNewSubscription(ctx, inv)
 	})
+}
+
+func (s *ProcessService) processNewSubscription(ctx context.Context, inv *model.Invoice) error {
+	plan, err := s.storage.GetPlanByID(ctx, inv.PlanID)
+	if err != nil {
+		return err
+	}
+
+	sub := &model.Subscription{
+		ID:        uuid.NewString(),
+		UserID:    inv.UserID,
+		InvoiceID: &inv.ID,
+		PlanID:    plan.ID,
+		ChatID:    inv.ChatID,
+		Status:    model.ActiveSubscriptionStatus,
+		StartAt:   time.Now().UTC(),
+		EndAt:     time.Now().UTC().AddDate(0, 0, int(plan.DurationDays)),
+	}
+	if err := s.storage.CreateSubscription(ctx, sub); err != nil {
+		return err
+	}
+
+	event := model.SubscriptionActivatedEvent{
+		UserID:            sub.UserID,
+		Region:            plan.Region,
+		DriverType:        plan.DriverType,
+		SubscribeDuration: time.Hour * time.Duration(24*plan.DurationDays),
+		SubscriptionID:    sub.ID,
+	}
+	return s.outbox.SaveOutboxEvent(ctx, model.EventTypeSubscriptionActivated, event)
+}
+
+func (s *ProcessService) processRenewal(ctx context.Context, inv *model.Invoice) error {
+	sub, err := s.storage.GetSubscriptionByIDForUpdate(ctx, *inv.RenewsSubscriptionID)
+	if err != nil {
+		return err
+	}
+
+	if sub.Status != model.ActiveSubscriptionStatus {
+		return ErrSubscriptionExpired
+	}
+	if sub.AgentID == nil || *sub.AgentID == "" {
+		return fmt.Errorf("renewal: subscription %s has no agent_id bound", sub.ID)
+	}
+
+	// Берём plan по invoice (юзер мог продлить тем же тарифом, но в общем
+	// случае продление — это новая оплата того же plan_id, что висит в invoice).
+	plan, err := s.storage.GetPlanByID(ctx, inv.PlanID)
+	if err != nil {
+		return err
+	}
+
+	newEnd := sub.EndAt.AddDate(0, 0, int(plan.DurationDays))
+	if err := s.storage.ExtendSubscriptionEndAt(ctx, sub.ID, newEnd); err != nil {
+		return err
+	}
+
+	renewed := model.SubscriptionRenewedEvent{
+		SubscriptionID: sub.ID,
+		AgentID:        *sub.AgentID,
+		UserID:         sub.UserID,
+		DriverType:     sub.DriverType,
+		NewEndAt:       newEnd,
+	}
+	if err := s.outbox.SaveOutboxEvent(ctx, model.EventTypeSubscriptionRenewed, renewed); err != nil {
+		return err
+	}
+
+	notify := model.SubscriptionRenewedNotificationEvent{
+		ChatID:   sub.ChatID,
+		NewEndAt: newEnd,
+	}
+	return s.outbox.SaveOutboxEvent(ctx, model.EventTypeSubscriptionRenewedNotification, notify)
 }

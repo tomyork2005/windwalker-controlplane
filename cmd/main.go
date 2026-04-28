@@ -71,7 +71,7 @@ func main() {
 	)
 
 	worker := workers.NewWorker(storage, agentSender, bot)
-	cleaner := cleaner.NewCleaner(storage)
+	cleaner := cleaner.NewCleaner(storage, cfg.CleanerConfig.ExpiryWarnings)
 
 	root := chi.NewRouter()
 	root.Use(middleware.Logger)

@@ -72,6 +72,43 @@ func (d *Dispatcher) DispatchUpsert(ctx context.Context, agentID string, subscri
 	}, nil
 }
 
+func (d *Dispatcher) DispatchRenew(ctx context.Context, agentID string, requestID string, rn *model.AgentRenewPayload) error {
+	payload, err := json.Marshal(rn)
+	if err != nil {
+		return fmt.Errorf("marshal renew payload: %w", err)
+	}
+
+	var seq uint64
+	err = d.store.WithTx(ctx, func(ctx context.Context) error {
+		seq, err = d.store.NextSeq(ctx, agentID)
+		if err != nil {
+			return err
+		}
+
+		return d.store.EnqueueTask(ctx, &model.AgentTask{
+			AgentID:   agentID,
+			Seq:       seq,
+			RequestID: requestID,
+			Kind:      model.OpRenew,
+			Payload:   payload,
+		})
+	})
+	if err != nil {
+		return fmt.Errorf("enqueue renew task: %w", err)
+	}
+
+	op := model.Operation{
+		AgentID:   agentID,
+		Seq:       seq,
+		RequestID: requestID,
+		Kind:      model.OpRenew,
+		Renew:     rn,
+	}
+
+	d.trySend(ctx, op)
+	return nil
+}
+
 func (d *Dispatcher) DispatchRemove(ctx context.Context, agentID string, requestID string, rm *model.AgentRemovePayload) error {
 	payload, err := json.Marshal(rm)
 	if err != nil {

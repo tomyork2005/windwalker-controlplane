@@ -72,13 +72,13 @@ func (s *ShopService) HasUsedTrial(ctx context.Context, userID string) (bool, er
 	return s.storage.HasUsedTrial(ctx, userID)
 }
 
-func (s *ShopService) CreateInvoice(ctx context.Context, planID string, telegramID int64, username string, methodID string, chatID int64) (*model.Invoice, error) {
+func (s *ShopService) CreateInvoice(ctx context.Context, planID string, telegramID int64, username string, methodID string, chatID int64, renewsSubscriptionID *string) (*model.Invoice, error) {
 	user, err := s.storage.UpsertUserByTelegramID(ctx, telegramID, username)
 	if err != nil {
 		return nil, err
 	}
 
-	slog.Info("CreateInvoice user:", "planID:", planID, "methodID:", methodID, "chat_id:", chatID)
+	slog.Info("CreateInvoice user:", "planID:", planID, "methodID:", methodID, "chat_id:", chatID, "renews_subscription_id:", renewsSubscriptionID)
 
 	plan, err := s.storage.GetPlanByID(ctx, planID)
 	if err != nil {
@@ -97,17 +97,18 @@ func (s *ShopService) CreateInvoice(ctx context.Context, planID string, telegram
 	}
 
 	invoice := &model.Invoice{
-		ID:              invoiceID,
-		ProviderOrderID: output.ProviderOrderID,
-		UserID:          user.ID,
-		PlanID:          plan.ID,
-		ChatID:          chatID,
-		PaymentProvider: output.ProviderName,
-		Money:           plan.Money,
-		Status:          model.CreatedInvoiceStatus,
-		CheckoutURL:     output.RedirectURL,
-		CreatedAt:       time.Now().UTC(),
-		ExpiresAt:       output.ExpiredAt,
+		ID:                   invoiceID,
+		ProviderOrderID:      output.ProviderOrderID,
+		UserID:               user.ID,
+		PlanID:               plan.ID,
+		ChatID:               chatID,
+		PaymentProvider:      output.ProviderName,
+		Money:                plan.Money,
+		Status:               model.CreatedInvoiceStatus,
+		CheckoutURL:          output.RedirectURL,
+		CreatedAt:            time.Now().UTC(),
+		ExpiresAt:            output.ExpiredAt,
+		RenewsSubscriptionID: renewsSubscriptionID,
 	}
 	if err := s.storage.CreateInvoice(ctx, invoice); err != nil {
 		return nil, err

@@ -25,7 +25,8 @@ func (s *Storage) GetInvoiceForUpdate(ctx context.Context, id string) (*model.In
 			checkout_url,
 			created_at,
 			expires_at,
-			paid_at
+			paid_at,
+			renews_subscription_id
 		FROM invoices
 		WHERE id = $1
 		FOR UPDATE
@@ -62,7 +63,8 @@ func (s *Storage) GetInvoiceByProviderOrder(ctx context.Context, providerName, p
 			checkout_url,
 			created_at,
 			expires_at,
-			paid_at
+			paid_at,
+			renews_subscription_id
 		FROM invoices
 		WHERE payment_provider = $1 AND provider_order_id = $2
 		FOR UPDATE
@@ -139,6 +141,7 @@ func (s *Storage) ListExpiredActiveSubs(ctx context.Context, limit int) ([]*mode
 			s.end_at,
 			s.creds,
 			s.creds_ready_at,
+			s.last_warning_at,
 			p.name           AS plan_name,
 			p.region         AS plan_region,
 			p.protocol       AS plan_protocol,
@@ -164,12 +167,135 @@ func (s *Storage) ListExpiredActiveSubs(ctx context.Context, limit int) ([]*mode
 	return out, nil
 }
 
+// ListSubsAboutToExpire locks up to `limit` active subscriptions whose end_at
+// falls within `threshold` from now and which haven't yet been warned for this
+// threshold. MUST be called inside WithTx — FOR UPDATE SKIP LOCKED gives us
+// cross-instance dedup. Predicate `last_warning_at < end_at - threshold` means
+// "the previous warning was sent before the subscription entered the current
+// window for this threshold" — guarantees one notification per threshold per
+// subscription cycle.
+func (s *Storage) ListSubsAboutToExpire(ctx context.Context, threshold time.Duration, limit int) ([]*model.SubscriptionWithPlan, error) {
+	const query = `
+		SELECT
+			s.id,
+			s.user_id,
+			s.invoice_id,
+			s.plan_id,
+			s.agent_id,
+			s.chat_id,
+			s.status,
+			s.is_trial,
+			s.start_at,
+			s.end_at,
+			s.creds,
+			s.creds_ready_at,
+			s.last_warning_at,
+			p.name           AS plan_name,
+			p.region         AS plan_region,
+			p.protocol       AS plan_protocol,
+			p.duration_days  AS plan_duration_days
+		FROM subscriptions s
+		JOIN plans p ON p.id = s.plan_id
+		WHERE s.status = 'active'
+		  AND s.end_at > now()
+		  AND s.end_at <= now() + make_interval(secs => $1)
+		  AND (s.last_warning_at IS NULL OR s.last_warning_at < s.end_at - make_interval(secs => $1))
+		ORDER BY s.end_at
+		LIMIT $2
+		FOR UPDATE OF s SKIP LOCKED
+	`
+
+	var rows []*subscriptionWithPlanRow
+	if err := pgxscan.Select(ctx, s.getExecutor(ctx), &rows, query, int64(threshold.Seconds()), limit); err != nil {
+		return nil, fmt.Errorf("list subs about to expire: %w", err)
+	}
+
+	out := make([]*model.SubscriptionWithPlan, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.toModel())
+	}
+
+	return out, nil
+}
+
+// GetSubscriptionByIDForUpdate locks subscription row by id for the lifetime of
+// the surrounding transaction. JOINs plans so callers don't need a second
+// round-trip for plan duration / driver type. MUST be called inside WithTx.
+func (s *Storage) GetSubscriptionByIDForUpdate(ctx context.Context, id string) (*model.SubscriptionWithPlan, error) {
+	const query = `
+		SELECT
+			s.id,
+			s.user_id,
+			s.invoice_id,
+			s.plan_id,
+			s.agent_id,
+			s.chat_id,
+			s.status,
+			s.is_trial,
+			s.start_at,
+			s.end_at,
+			s.creds,
+			s.creds_ready_at,
+			s.last_warning_at,
+			p.name           AS plan_name,
+			p.region         AS plan_region,
+			p.protocol       AS plan_protocol,
+			p.duration_days  AS plan_duration_days
+		FROM subscriptions s
+		JOIN plans p ON p.id = s.plan_id
+		WHERE s.id = $1
+		FOR UPDATE OF s
+	`
+
+	var row subscriptionWithPlanRow
+	if err := pgxscan.Get(ctx, s.getExecutor(ctx), &row, query, id); err != nil {
+		if pgxscan.NotFound(err) {
+			return nil, storage.ErrNotFound
+		}
+		return nil, fmt.Errorf("get subscription by id for update: %w", err)
+	}
+
+	return row.toModel(), nil
+}
+
+// ExtendSubscriptionEndAt shifts subscription end_at and resets last_warning_at
+// so the notifier fires again ahead of the new expiry.
+func (s *Storage) ExtendSubscriptionEndAt(ctx context.Context, id string, newEndAt time.Time) error {
+	const query = `UPDATE subscriptions SET end_at = $2, last_warning_at = NULL WHERE id = $1`
+
+	tag, err := s.getExecutor(ctx).Exec(ctx, query, id, newEndAt)
+	if err != nil {
+		return fmt.Errorf("extend subscription end_at: %w", err)
+	}
+
+	if tag.RowsAffected() == 0 {
+		return storage.ErrNotFound
+	}
+
+	return nil
+}
+
 func (s *Storage) MarkSubscriptionInactive(ctx context.Context, id string) error {
 	const query = `UPDATE subscriptions SET status = 'inactive' WHERE id = $1`
 
 	tag, err := s.getExecutor(ctx).Exec(ctx, query, id)
 	if err != nil {
 		return fmt.Errorf("mark subscription inactive: %w", err)
+	}
+
+	if tag.RowsAffected() == 0 {
+		return storage.ErrNotFound
+	}
+
+	return nil
+}
+
+func (s *Storage) MarkSubscriptionWarned(ctx context.Context, id string) error {
+	const query = `UPDATE subscriptions SET last_warning_at = now() WHERE id = $1`
+
+	tag, err := s.getExecutor(ctx).Exec(ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("mark subscription warned: %w", err)
 	}
 
 	if tag.RowsAffected() == 0 {
@@ -220,19 +346,20 @@ func (s *Storage) CreateSubscription(ctx context.Context, sub *model.Subscriptio
 // DAO
 
 type invoiceRow struct {
-	ID              string     `db:"id"`
-	ProviderOrderID *string    `db:"provider_order_id"`
-	UserID          string     `db:"user_id"`
-	PlanID          string     `db:"plan_id"`
-	ChatID          int64      `db:"chat_id"`
-	PaymentProvider string     `db:"payment_provider"`
-	MoneyAmount     int64      `db:"money_amount"`
-	MoneyCurr       string     `db:"money_currency"`
-	Status          string     `db:"status"`
-	CheckoutURL     string     `db:"checkout_url"`
-	CreatedAt       time.Time  `db:"created_at"`
-	ExpiresAt       time.Time  `db:"expires_at"`
-	PaidAt          *time.Time `db:"paid_at"`
+	ID                   string     `db:"id"`
+	ProviderOrderID      *string    `db:"provider_order_id"`
+	UserID               string     `db:"user_id"`
+	PlanID               string     `db:"plan_id"`
+	ChatID               int64      `db:"chat_id"`
+	PaymentProvider      string     `db:"payment_provider"`
+	MoneyAmount          int64      `db:"money_amount"`
+	MoneyCurr            string     `db:"money_currency"`
+	Status               string     `db:"status"`
+	CheckoutURL          string     `db:"checkout_url"`
+	CreatedAt            time.Time  `db:"created_at"`
+	ExpiresAt            time.Time  `db:"expires_at"`
+	PaidAt               *time.Time `db:"paid_at"`
+	RenewsSubscriptionID *string    `db:"renews_subscription_id"`
 }
 
 func (r *invoiceRow) toModel() (*model.Invoice, error) {
@@ -242,16 +369,17 @@ func (r *invoiceRow) toModel() (*model.Invoice, error) {
 	}
 
 	invoice := &model.Invoice{
-		ID:              r.ID,
-		UserID:          r.UserID,
-		PlanID:          r.PlanID,
-		ChatID:          r.ChatID,
-		PaymentProvider: r.PaymentProvider,
-		Money:           money,
-		Status:          model.InvoiceStatus(r.Status),
-		CheckoutURL:     r.CheckoutURL,
-		CreatedAt:       r.CreatedAt,
-		ExpiresAt:       r.ExpiresAt,
+		ID:                   r.ID,
+		UserID:               r.UserID,
+		PlanID:               r.PlanID,
+		ChatID:               r.ChatID,
+		PaymentProvider:      r.PaymentProvider,
+		Money:                money,
+		Status:               model.InvoiceStatus(r.Status),
+		CheckoutURL:          r.CheckoutURL,
+		CreatedAt:            r.CreatedAt,
+		ExpiresAt:            r.ExpiresAt,
+		RenewsSubscriptionID: r.RenewsSubscriptionID,
 	}
 
 	if r.ProviderOrderID != nil {

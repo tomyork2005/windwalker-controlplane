@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS invoices (
     checkout_url TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL,
     expires_at TIMESTAMPTZ NOT NULL,
-    paid_at TIMESTAMPTZ
+    paid_at TIMESTAMPTZ,
+    renews_subscription_id TEXT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_invoices_user_id ON invoices(user_id);

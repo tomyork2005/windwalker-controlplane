@@ -14,6 +14,11 @@ telegram:
 agent:
   heartbeat_interval: 1
 
+cleaner:
+  expiry_warnings:
+    - 24h
+    - 3h
+
 grpc:
   port: ":50051"
 

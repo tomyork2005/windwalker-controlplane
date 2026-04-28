@@ -51,6 +51,14 @@ func TaskToOperation(task *AgentTask) (Operation, error) {
 		op.Remove = &payload
 		return op, nil
 
+	case OpRenew:
+		var payload AgentRenewPayload
+		if err := json.Unmarshal(task.Payload, &payload); err != nil {
+			return Operation{}, fmt.Errorf("unmarshal renew payload: %w", err)
+		}
+		op.Renew = &payload
+		return op, nil
+
 	default:
 		return Operation{}, fmt.Errorf("unknown task kind: %s", task.Kind)
 	}

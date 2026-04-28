@@ -18,6 +18,40 @@ const mainMenuText = `🕊️ <b>Wind-Walker VPN</b> — быстрый и на�
 📱 Одна подписка для всех видов устройств
 ♾ Возможность смотреть YouTube без рекламы`
 
+func (b *Bot) renderMainMenu(ctx context.Context, c tele.Context) error {
+	showTrial := true
+
+	user, err := b.svc.UpsertUserByTelegramID(ctx, c.Sender().ID, c.Sender().Username)
+	if err == nil {
+		used, _ := b.svc.HasUsedTrial(ctx, user.ID)
+		showTrial = !used
+	}
+
+	return b.editOrSend(c, mainMenuText, buildMainMenuKeyboard(showTrial), tele.ModeHTML)
+}
+
+func buildMainMenuKeyboard(showTrial bool) *tele.ReplyMarkup {
+	var kb tele.ReplyMarkup
+
+	rows := make([]tele.Row, 0, 4)
+
+	if showTrial {
+		rows = append(rows, kb.Row(kb.Data("🎁 Попробовать бесплатно", string(actTrialActivate), "")))
+	}
+
+	rows = append(rows,
+		kb.Row(kb.Data("💳 Купить / Продлить", string(actMenuBuy), "")),
+		kb.Row(kb.Data("👤 Моя подписка", string(actMySubscription), "")),
+		kb.Row(
+			kb.Data("ℹ О нас", string(actAbout), ""),
+			kb.Data("💬 Поддержка", string(actSupport), ""),
+		),
+	)
+
+	kb.Inline(rows...)
+	return &kb
+}
+
 func (b *Bot) editOrSend(c tele.Context, text string, kb *tele.ReplyMarkup, opts ...interface{}) error {
 	args := make([]interface{}, 0, len(opts)+1)
 	if kb != nil {
@@ -47,34 +81,6 @@ func (b *Bot) editOrSend(c tele.Context, text string, kb *tele.ReplyMarkup, opts
 	}
 	b.photoCache.Capture(msg)
 	return nil
-}
-
-func (b *Bot) renderMainMenu(ctx context.Context, c tele.Context) error {
-	showTrial := true
-	user, err := b.svc.UpsertUserByTelegramID(ctx, c.Sender().ID, c.Sender().Username)
-	if err == nil {
-		used, _ := b.svc.HasUsedTrial(ctx, user.ID)
-		showTrial = !used
-	}
-	return b.editOrSend(c, mainMenuText, buildMainMenuKeyboard(showTrial), tele.ModeHTML)
-}
-
-func buildMainMenuKeyboard(showTrial bool) *tele.ReplyMarkup {
-	var kb tele.ReplyMarkup
-	rows := make([]tele.Row, 0, 4)
-	if showTrial {
-		rows = append(rows, kb.Row(kb.Data("🎁 Попробовать бесплатно", string(actTrialActivate), "")))
-	}
-	rows = append(rows,
-		kb.Row(kb.Data("💳 Купить / Продлить", string(actMenuBuy), "")),
-		kb.Row(kb.Data("👤 Моя подписка", string(actMySubscription), "")),
-		kb.Row(
-			kb.Data("ℹ О нас", string(actAbout), ""),
-			kb.Data("💬 Поддержка", string(actSupport), ""),
-		),
-	)
-	kb.Inline(rows...)
-	return &kb
 }
 
 func (b *Bot) renderMySubscription(ctx context.Context, c tele.Context) error {
@@ -127,7 +133,7 @@ func (b *Bot) renderMySubscription(ctx context.Context, c tele.Context) error {
 		rows = append(rows, kb.Row(kb.URL("📖 Инструкция", b.cfg.InstructionURL)))
 	}
 	rows = append(rows,
-		kb.Row(kb.Data("💳 Продлить", string(actMenuBuy), "")),
+		kb.Row(kb.Data("💳 Продлить", string(actRenewPickDuration), sub.ID)),
 		kb.Row(kb.Data("◀ В меню", string(actBackToMain), "")),
 	)
 	kb.Inline(rows...)

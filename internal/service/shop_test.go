@@ -59,7 +59,55 @@ func TestShopService_CreateInvoice_propagatesProviderOrderID(t *testing.T) {
 	}).Return(nil)
 
 	svc := NewShopService(payMock, storageMock, outboxMock)
-	inv, err := svc.CreateInvoice(t.Context(), planID, telegramID, username, "sbp", chatID)
+	inv, err := svc.CreateInvoice(t.Context(), planID, telegramID, username, "sbp", chatID, nil)
 	require.NoError(t, err)
 	assert.Equal(t, providerOrderID, inv.ProviderOrderID)
+}
+
+func TestShopService_CreateInvoice_persistsRenewsSubscriptionID(t *testing.T) {
+	t.Parallel()
+
+	const (
+		telegramID = int64(7)
+		username   = "alice"
+		chatID     = int64(7)
+		userID     = "u-1"
+		planID     = "p-1"
+		subID      = "sub-renew"
+	)
+
+	ctrl := minimock.NewController(t)
+	payMock := servicemocks.NewShopPaymentMock(ctrl)
+	storageMock := servicemocks.NewShopStorageMock(ctrl)
+	outboxMock := servicemocks.NewShopOutboxMock(ctrl)
+
+	plan := &model.Plan{
+		ID:           planID,
+		Region:       "ru",
+		DriverType:   "vless",
+		Money:        model.Money{Amount: 200, Curr: model.RUBCurrency},
+		DurationDays: 30,
+	}
+
+	storageMock.UpsertUserByTelegramIDMock.
+		Expect(minimock.AnyContext, telegramID, username).
+		Return(&model.User{ID: userID}, nil)
+	storageMock.GetPlanByIDMock.Expect(minimock.AnyContext, planID).Return(plan, nil)
+	payMock.CreatePaymentOrderMock.Set(func(_ context.Context, _ model.CreateOrderInput) (model.CreateOrderOutput, error) {
+		return model.CreateOrderOutput{
+			ProviderName:    "Platega",
+			ProviderOrderID: "tx-renew",
+			RedirectURL:     "https://pay/renew",
+			ExpiredAt:       time.Now().Add(15 * time.Minute),
+		}, nil
+	})
+	storageMock.CreateInvoiceMock.Inspect(func(_ context.Context, inv *model.Invoice) {
+		require.NotNil(t, inv.RenewsSubscriptionID)
+		assert.Equal(t, subID, *inv.RenewsSubscriptionID)
+	}).Return(nil)
+
+	svc := NewShopService(payMock, storageMock, outboxMock)
+	renew := subID
+	_, err := svc.CreateInvoice(t.Context(), planID, telegramID, username, "sbp", chatID, &renew)
+	require.NoError(t, err)
 }

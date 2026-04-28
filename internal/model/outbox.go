@@ -3,11 +3,15 @@ package model
 import "time"
 
 const (
-	EventTypeSubscriptionActivated      = "subscription_activated"
-	EventTypeSubscriptionCancelled      = "subscription_cancelled"
-	EventTypeInvoicePaidNotification    = "invoice_paid_notification"
-	EventTypeCredsDelivery              = "creds_delivery"
-	EventTypeDeliveryFailedNotification = "delivery_failed_notification"
+	EventTypeSubscriptionActivated            = "subscription_activated"
+	EventTypeSubscriptionCancelled            = "subscription_cancelled"
+	EventTypeSubscriptionRenewed              = "subscription_renewed"
+	EventTypeSubscriptionRenewedNotification  = "subscription_renewed_notification"
+	EventTypeInvoicePaidNotification          = "invoice_paid_notification"
+	EventTypeCredsDelivery                    = "creds_delivery"
+	EventTypeDeliveryFailedNotification       = "delivery_failed_notification"
+	EventTypeSubscriptionExpiringNotification = "subscription_expiring_notification"
+	EventTypeSubscriptionExpiredNotification  = "subscription_expired_notification"
 )
 
 type SubscriptionActivatedEvent struct {
@@ -40,6 +44,30 @@ type CredsDeliveryEvent struct {
 type DeliveryFailedNotificationEvent struct {
 	SubscriptionID string `json:"subscription_id"`
 	ChatID         int64  `json:"chat_id"`
+}
+
+type SubscriptionExpiringNotificationEvent struct {
+	SubscriptionID    string        `json:"subscription_id"`
+	ChatID            int64         `json:"chat_id"`
+	RemainingDuration time.Duration `json:"remaining_duration"`
+}
+
+type SubscriptionExpiredNotificationEvent struct {
+	SubscriptionID string `json:"subscription_id"`
+	ChatID         int64  `json:"chat_id"`
+}
+
+type SubscriptionRenewedEvent struct {
+	SubscriptionID string    `json:"subscription_id"`
+	AgentID        string    `json:"agent_id"`
+	UserID         string    `json:"user_id"`
+	DriverType     string    `json:"driver_type"`
+	NewEndAt       time.Time `json:"new_end_at"`
+}
+
+type SubscriptionRenewedNotificationEvent struct {
+	ChatID   int64     `json:"chat_id"`
+	NewEndAt time.Time `json:"new_end_at"`
 }
 
 type OutboxEvent struct {

@@ -193,6 +193,7 @@ func (s *Storage) GetActiveSubscriptionByUser(ctx context.Context, userID string
 			s.end_at,
 			s.creds,
 			s.creds_ready_at,
+			s.last_warning_at,
 			p.name           AS plan_name,
 			p.region         AS plan_region,
 			p.protocol       AS plan_protocol,
@@ -250,9 +251,10 @@ func (s *Storage) CreateInvoice(ctx context.Context, invoice *model.Invoice) err
 			status,
 			checkout_url,
 			created_at,
-			expires_at
+			expires_at,
+			renews_subscription_id
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 	`
 
 	var providerOrderID any
@@ -275,6 +277,7 @@ func (s *Storage) CreateInvoice(ctx context.Context, invoice *model.Invoice) err
 		invoice.CheckoutURL,
 		invoice.CreatedAt,
 		invoice.ExpiresAt,
+		invoice.RenewsSubscriptionID,
 	)
 	if err != nil {
 		return fmt.Errorf("create invoice: %w", err)
@@ -330,39 +333,41 @@ func (r *planRow) toModel() (*model.Plan, error) {
 }
 
 type subscriptionWithPlanRow struct {
-	ID           string     `db:"id"`
-	UserID       string     `db:"user_id"`
-	InvoiceID    *string    `db:"invoice_id"`
-	PlanID       string     `db:"plan_id"`
-	AgentID      *string    `db:"agent_id"`
-	ChatID       int64      `db:"chat_id"`
-	Status       string     `db:"status"`
-	IsTrial      bool       `db:"is_trial"`
-	StartAt      time.Time  `db:"start_at"`
-	EndAt        time.Time  `db:"end_at"`
-	Creds        *string    `db:"creds"`
-	CredsReadyAt *time.Time `db:"creds_ready_at"`
-	PlanName     string     `db:"plan_name"`
-	PlanRegion   string     `db:"plan_region"`
-	PlanProtocol string     `db:"plan_protocol"`
-	PlanDuration int64      `db:"plan_duration_days"`
+	ID            string     `db:"id"`
+	UserID        string     `db:"user_id"`
+	InvoiceID     *string    `db:"invoice_id"`
+	PlanID        string     `db:"plan_id"`
+	AgentID       *string    `db:"agent_id"`
+	ChatID        int64      `db:"chat_id"`
+	Status        string     `db:"status"`
+	IsTrial       bool       `db:"is_trial"`
+	StartAt       time.Time  `db:"start_at"`
+	EndAt         time.Time  `db:"end_at"`
+	Creds         *string    `db:"creds"`
+	CredsReadyAt  *time.Time `db:"creds_ready_at"`
+	LastWarningAt *time.Time `db:"last_warning_at"`
+	PlanName      string     `db:"plan_name"`
+	PlanRegion    string     `db:"plan_region"`
+	PlanProtocol  string     `db:"plan_protocol"`
+	PlanDuration  int64      `db:"plan_duration_days"`
 }
 
 func (r *subscriptionWithPlanRow) toModel() *model.SubscriptionWithPlan {
 	return &model.SubscriptionWithPlan{
 		Subscription: model.Subscription{
-			ID:           r.ID,
-			UserID:       r.UserID,
-			InvoiceID:    r.InvoiceID,
-			PlanID:       r.PlanID,
-			AgentID:      r.AgentID,
-			ChatID:       r.ChatID,
-			Status:       model.SubscriptionStatus(r.Status),
-			IsTrial:      r.IsTrial,
-			StartAt:      r.StartAt,
-			EndAt:        r.EndAt,
-			Creds:        r.Creds,
-			CredsReadyAt: r.CredsReadyAt,
+			ID:            r.ID,
+			UserID:        r.UserID,
+			InvoiceID:     r.InvoiceID,
+			PlanID:        r.PlanID,
+			AgentID:       r.AgentID,
+			ChatID:        r.ChatID,
+			Status:        model.SubscriptionStatus(r.Status),
+			IsTrial:       r.IsTrial,
+			StartAt:       r.StartAt,
+			EndAt:         r.EndAt,
+			Creds:         r.Creds,
+			CredsReadyAt:  r.CredsReadyAt,
+			LastWarningAt: r.LastWarningAt,
 		},
 		PlanName:     r.PlanName,
 		Region:       r.PlanRegion,

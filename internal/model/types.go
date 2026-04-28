@@ -57,18 +57,19 @@ type Plan struct {
 }
 
 type Invoice struct {
-	ID              string
-	ProviderOrderID string
-	UserID          string
-	PlanID          string
-	ChatID          int64
-	PaymentProvider string
-	Money           Money
-	Status          InvoiceStatus
-	CheckoutURL     string
-	CreatedAt       time.Time
-	ExpiresAt       time.Time
-	PaidAt          time.Time
+	ID                   string
+	ProviderOrderID      string
+	UserID               string
+	PlanID               string
+	ChatID               int64
+	PaymentProvider      string
+	Money                Money
+	Status               InvoiceStatus
+	CheckoutURL          string
+	CreatedAt            time.Time
+	ExpiresAt            time.Time
+	PaidAt               time.Time
+	RenewsSubscriptionID *string
 }
 
 type PaymentMethod struct {
@@ -105,18 +106,19 @@ type CallbackOutput struct {
 }
 
 type Subscription struct {
-	ID           string
-	UserID       string
-	InvoiceID    *string
-	PlanID       string
-	AgentID      *string
-	ChatID       int64
-	Status       SubscriptionStatus
-	IsTrial      bool
-	StartAt      time.Time
-	EndAt        time.Time
-	Creds        *string
-	CredsReadyAt *time.Time
+	ID            string
+	UserID        string
+	InvoiceID     *string
+	PlanID        string
+	AgentID       *string
+	ChatID        int64
+	Status        SubscriptionStatus
+	IsTrial       bool
+	StartAt       time.Time
+	EndAt         time.Time
+	Creds         *string
+	CredsReadyAt  *time.Time
+	LastWarningAt *time.Time
 }
 
 type SubscriptionWithPlan struct {

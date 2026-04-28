@@ -19,6 +19,7 @@ type AgentSenderStorage interface {
 type AgentDispatcher interface {
 	DispatchUpsert(ctx context.Context, agentID string, subscriptionID string, payload *model.AgentUpsertPayload) (*model.Operation, error)
 	DispatchRemove(ctx context.Context, agentID string, subscriptionID string, payload *model.AgentRemovePayload) error
+	DispatchRenew(ctx context.Context, agentID string, subscriptionID string, payload *model.AgentRenewPayload) error
 
 	TryDispatchPrepared(ctx context.Context, op *model.Operation)
 }
@@ -70,6 +71,24 @@ func (s *AgentSender) StartUserSubscribe(ctx context.Context, input model.Subscr
 	}
 
 	s.dispatcher.TryDispatchPrepared(ctx, op)
+	return nil
+}
+
+func (s *AgentSender) RenewUserSubscribe(ctx context.Context, input model.SubscriptionRenewedEvent) error {
+	if input.AgentID == "" {
+		return fmt.Errorf("renew user subscribe: empty agent_id in event for subscription %s", input.SubscriptionID)
+	}
+
+	payload := &model.AgentRenewPayload{
+		UserID:     input.UserID,
+		DriverType: input.DriverType,
+		ExpiresAt:  input.NewEndAt,
+	}
+
+	if err := s.dispatcher.DispatchRenew(ctx, input.AgentID, input.SubscriptionID, payload); err != nil {
+		return fmt.Errorf("dispatch renew user: %w", err)
+	}
+
 	return nil
 }
 

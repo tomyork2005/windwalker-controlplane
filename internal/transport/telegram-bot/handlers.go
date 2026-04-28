@@ -19,7 +19,7 @@ import (
 type ShopService interface {
 	ListPlans(ctx context.Context) ([]*model.Plan, error)
 	ListPaymentMethods(ctx context.Context) ([]*model.PaymentMethod, error)
-	CreateInvoice(ctx context.Context, planID string, telegramID int64, username string, methodID string, chatID int64) (*model.Invoice, error)
+	CreateInvoice(ctx context.Context, planID string, telegramID int64, username string, methodID string, chatID int64, renewsSubscriptionID *string) (*model.Invoice, error)
 	ActivateTrial(ctx context.Context, telegramID int64, username string, chatID int64) (*model.Subscription, error)
 	UpsertUserByTelegramID(ctx context.Context, telegramID int64, username string) (*model.User, error)
 	GetActiveSubscriptionByUser(ctx context.Context, userID string) (*model.SubscriptionWithPlan, error)
@@ -40,6 +40,7 @@ const (
 	actPickProtocol      action = "pick_protocol"
 	actPickDuration      action = "pick_duration"
 	actPickPaymentMethod action = "pick_payment_method"
+	actRenewPickDuration action = "renew_pick_duration"
 )
 
 var cbRouter = map[action]func(*Bot, tele.Context, string) error{
@@ -53,6 +54,7 @@ var cbRouter = map[action]func(*Bot, tele.Context, string) error{
 	actPickProtocol:      (*Bot).onPickProtocol,
 	actPickDuration:      (*Bot).onPickDuration,
 	actPickPaymentMethod: (*Bot).onPickPaymentMethod,
+	actRenewPickDuration: (*Bot).onRenewPickDuration,
 }
 
 type Bot struct {
@@ -177,6 +179,7 @@ func (b *Bot) onMenuBuy(c tele.Context, _ string) error {
 	if err != nil {
 		return c.Respond(&tele.CallbackResponse{Text: "Не удалось загрузить планы", ShowAlert: true})
 	}
+	b.state.Delete(c.Sender().ID)
 	b.state.SetActualPlans(c.Sender().ID, plans)
 
 	buttons := buildRegionBtns(plans)
@@ -284,6 +287,43 @@ func (b *Bot) onPickDuration(c tele.Context, planID string) error {
 	return b.editOrSend(c, "Выберите способ оплаты:", buttons)
 }
 
+func (b *Bot) onRenewPickDuration(c tele.Context, subscriptionID string) error {
+	ctx, cancel := context.WithTimeout(b.appCtx, 5*time.Second)
+	defer cancel()
+
+	if subscriptionID == "" {
+		return c.Respond(&tele.CallbackResponse{Text: "Некорректные данные кнопки", ShowAlert: true})
+	}
+
+	user, err := b.svc.UpsertUserByTelegramID(ctx, c.Sender().ID, c.Sender().Username)
+	if err != nil {
+		return c.Respond(&tele.CallbackResponse{Text: "Не удалось загрузить профиль", ShowAlert: true})
+	}
+
+	sub, err := b.svc.GetActiveSubscriptionByUser(ctx, user.ID)
+	if err != nil || sub.ID != subscriptionID {
+		return c.Respond(&tele.CallbackResponse{Text: "Подписка истекла, оформите новую через /menu", ShowAlert: true})
+	}
+
+	plans, err := b.svc.ListPlans(ctx)
+	if err != nil {
+		return c.Respond(&tele.CallbackResponse{Text: "Не удалось загрузить планы", ShowAlert: true})
+	}
+	b.state.SetActualPlans(c.Sender().ID, plans)
+	b.state.Store(c.Sender().ID, orderState{
+		Region:              sub.Region,
+		Protocol:            sub.DriverType,
+		RenewSubscriptionID: sub.ID,
+	})
+
+	buttons := buildDurationBtns(plans, sub.Region, sub.DriverType)
+	if buttons == nil {
+		return c.Respond(&tele.CallbackResponse{Text: "Для продления нет доступных тарифов", ShowAlert: true})
+	}
+
+	return b.editOrSend(c, "Выберите длительность продления:", buttons)
+}
+
 func (b *Bot) onPickPaymentMethod(c tele.Context, payload string) error {
 	ctx, cancel := context.WithTimeout(b.appCtx, 10*time.Second)
 	defer cancel()
@@ -293,7 +333,24 @@ func (b *Bot) onPickPaymentMethod(c tele.Context, payload string) error {
 		return c.Respond(&tele.CallbackResponse{Text: "Некорректные данные кнопки", ShowAlert: true})
 	}
 
-	inv, err := b.svc.CreateInvoice(ctx, planID, c.Sender().ID, c.Sender().Username, methodID, c.Chat().ID)
+	var renewsSubscriptionID *string
+	if st, ok := b.state.Load(c.Sender().ID); ok && st.RenewSubscriptionID != "" {
+		// Повторная storage-проверка: подписка всё ещё active и принадлежит юзеру.
+		// Защита от race (cleaner истёк подписку) и от подделанного state.
+		user, err := b.svc.UpsertUserByTelegramID(ctx, c.Sender().ID, c.Sender().Username)
+		if err != nil {
+			return c.Respond(&tele.CallbackResponse{Text: "Не удалось загрузить профиль", ShowAlert: true})
+		}
+		sub, err := b.svc.GetActiveSubscriptionByUser(ctx, user.ID)
+		if err != nil || sub.ID != st.RenewSubscriptionID {
+			b.state.Delete(c.Sender().ID)
+			return c.Respond(&tele.CallbackResponse{Text: "Подписка истекла, оформите новую через /menu", ShowAlert: true})
+		}
+		id := st.RenewSubscriptionID
+		renewsSubscriptionID = &id
+	}
+
+	inv, err := b.svc.CreateInvoice(ctx, planID, c.Sender().ID, c.Sender().Username, methodID, c.Chat().ID, renewsSubscriptionID)
 	if err != nil {
 		return c.Respond(&tele.CallbackResponse{Text: "Не удалось создать счёт", ShowAlert: true})
 	}

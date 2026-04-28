@@ -1,15 +1,18 @@
 package config
 
 import (
-	"github.com/ilyakaznacheev/cleanenv"
 	"log"
 	"os"
+	"time"
+
+	"github.com/ilyakaznacheev/cleanenv"
 )
 
 type Config struct {
 	Postgres       `yaml:"postgres"`
 	TelegramConfig `yaml:"telegram"`
 	AgentConfig    `yaml:"agent"`
+	CleanerConfig  `yaml:"cleaner"`
 	GRPCConfig     `yaml:"grpc"`
 	HTTPConfig     `yaml:"http"`
 
@@ -35,6 +38,10 @@ type TelegramConfig struct {
 
 type AgentConfig struct {
 	HeartbeatIntervalMinutes int `yaml:"heartbeat_interval" env:"HEARTBEAT_INTERVAL"`
+}
+
+type CleanerConfig struct {
+	ExpiryWarnings []time.Duration `yaml:"expiry_warnings" env:"CLEANER_EXPIRY_WARNINGS" env-separator:","`
 }
 
 type CryptoCloudConfig struct {

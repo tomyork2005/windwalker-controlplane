@@ -1,15 +1,16 @@
 -- +goose Up
 CREATE TABLE IF NOT EXISTS subscriptions (
-    id          TEXT        PRIMARY KEY,
-    user_id     TEXT        NOT NULL REFERENCES users(id),
-    invoice_id  TEXT        NULL REFERENCES invoices(id),
-    plan_id     TEXT        NOT NULL REFERENCES plans(id),
-    agent_id    TEXT,
-    chat_id     BIGINT      NOT NULL,
-    status      TEXT        NOT NULL,
-    is_trial    BOOLEAN     NOT NULL DEFAULT FALSE,
-    start_at    TIMESTAMPTZ NOT NULL,
-    end_at      TIMESTAMPTZ NOT NULL
+    id              TEXT        PRIMARY KEY,
+    user_id         TEXT        NOT NULL REFERENCES users(id),
+    invoice_id      TEXT        NULL REFERENCES invoices(id),
+    plan_id         TEXT        NOT NULL REFERENCES plans(id),
+    agent_id        TEXT,
+    chat_id         BIGINT      NOT NULL,
+    status          TEXT        NOT NULL,
+    is_trial        BOOLEAN     NOT NULL DEFAULT FALSE,
+    start_at        TIMESTAMPTZ NOT NULL,
+    end_at          TIMESTAMPTZ NOT NULL,
+    last_warning_at TIMESTAMPTZ NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id     ON subscriptions(user_id);

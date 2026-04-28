@@ -9,6 +9,7 @@ import (
 	"control-plane/internal/model"
 	"sync"
 	mm_atomic "sync/atomic"
+	"time"
 	mm_time "time"
 
 	"github.com/gojuno/minimock/v3"
@@ -26,6 +27,13 @@ type ProcessStorageMock struct {
 	beforeCreateSubscriptionCounter uint64
 	CreateSubscriptionMock          mProcessStorageMockCreateSubscription
 
+	funcExtendSubscriptionEndAt          func(ctx context.Context, id string, newEndAt time.Time) (err error)
+	funcExtendSubscriptionEndAtOrigin    string
+	inspectFuncExtendSubscriptionEndAt   func(ctx context.Context, id string, newEndAt time.Time)
+	afterExtendSubscriptionEndAtCounter  uint64
+	beforeExtendSubscriptionEndAtCounter uint64
+	ExtendSubscriptionEndAtMock          mProcessStorageMockExtendSubscriptionEndAt
+
 	funcGetInvoiceByProviderOrder          func(ctx context.Context, providerName string, providerOrderID string) (ip1 *model.Invoice, err error)
 	funcGetInvoiceByProviderOrderOrigin    string
 	inspectFuncGetInvoiceByProviderOrder   func(ctx context.Context, providerName string, providerOrderID string)
@@ -39,6 +47,13 @@ type ProcessStorageMock struct {
 	afterGetPlanByIDCounter  uint64
 	beforeGetPlanByIDCounter uint64
 	GetPlanByIDMock          mProcessStorageMockGetPlanByID
+
+	funcGetSubscriptionByIDForUpdate          func(ctx context.Context, id string) (sp1 *model.SubscriptionWithPlan, err error)
+	funcGetSubscriptionByIDForUpdateOrigin    string
+	inspectFuncGetSubscriptionByIDForUpdate   func(ctx context.Context, id string)
+	afterGetSubscriptionByIDForUpdateCounter  uint64
+	beforeGetSubscriptionByIDForUpdateCounter uint64
+	GetSubscriptionByIDForUpdateMock          mProcessStorageMockGetSubscriptionByIDForUpdate
 
 	funcUpdateInvoice          func(ctx context.Context, invoice *model.Invoice) (err error)
 	funcUpdateInvoiceOrigin    string
@@ -66,11 +81,17 @@ func NewProcessStorageMock(t minimock.Tester) *ProcessStorageMock {
 	m.CreateSubscriptionMock = mProcessStorageMockCreateSubscription{mock: m}
 	m.CreateSubscriptionMock.callArgs = []*ProcessStorageMockCreateSubscriptionParams{}
 
+	m.ExtendSubscriptionEndAtMock = mProcessStorageMockExtendSubscriptionEndAt{mock: m}
+	m.ExtendSubscriptionEndAtMock.callArgs = []*ProcessStorageMockExtendSubscriptionEndAtParams{}
+
 	m.GetInvoiceByProviderOrderMock = mProcessStorageMockGetInvoiceByProviderOrder{mock: m}
 	m.GetInvoiceByProviderOrderMock.callArgs = []*ProcessStorageMockGetInvoiceByProviderOrderParams{}
 
 	m.GetPlanByIDMock = mProcessStorageMockGetPlanByID{mock: m}
 	m.GetPlanByIDMock.callArgs = []*ProcessStorageMockGetPlanByIDParams{}
+
+	m.GetSubscriptionByIDForUpdateMock = mProcessStorageMockGetSubscriptionByIDForUpdate{mock: m}
+	m.GetSubscriptionByIDForUpdateMock.callArgs = []*ProcessStorageMockGetSubscriptionByIDForUpdateParams{}
 
 	m.UpdateInvoiceMock = mProcessStorageMockUpdateInvoice{mock: m}
 	m.UpdateInvoiceMock.callArgs = []*ProcessStorageMockUpdateInvoiceParams{}
@@ -422,6 +443,379 @@ func (m *ProcessStorageMock) MinimockCreateSubscriptionInspect() {
 	if !m.CreateSubscriptionMock.invocationsDone() && afterCreateSubscriptionCounter > 0 {
 		m.t.Errorf("Expected %d calls to ProcessStorageMock.CreateSubscription at\n%s but found %d calls",
 			mm_atomic.LoadUint64(&m.CreateSubscriptionMock.expectedInvocations), m.CreateSubscriptionMock.expectedInvocationsOrigin, afterCreateSubscriptionCounter)
+	}
+}
+
+type mProcessStorageMockExtendSubscriptionEndAt struct {
+	optional           bool
+	mock               *ProcessStorageMock
+	defaultExpectation *ProcessStorageMockExtendSubscriptionEndAtExpectation
+	expectations       []*ProcessStorageMockExtendSubscriptionEndAtExpectation
+
+	callArgs []*ProcessStorageMockExtendSubscriptionEndAtParams
+	mutex    sync.RWMutex
+
+	expectedInvocations       uint64
+	expectedInvocationsOrigin string
+}
+
+// ProcessStorageMockExtendSubscriptionEndAtExpectation specifies expectation struct of the ProcessStorage.ExtendSubscriptionEndAt
+type ProcessStorageMockExtendSubscriptionEndAtExpectation struct {
+	mock               *ProcessStorageMock
+	params             *ProcessStorageMockExtendSubscriptionEndAtParams
+	paramPtrs          *ProcessStorageMockExtendSubscriptionEndAtParamPtrs
+	expectationOrigins ProcessStorageMockExtendSubscriptionEndAtExpectationOrigins
+	results            *ProcessStorageMockExtendSubscriptionEndAtResults
+	returnOrigin       string
+	Counter            uint64
+}
+
+// ProcessStorageMockExtendSubscriptionEndAtParams contains parameters of the ProcessStorage.ExtendSubscriptionEndAt
+type ProcessStorageMockExtendSubscriptionEndAtParams struct {
+	ctx      context.Context
+	id       string
+	newEndAt time.Time
+}
+
+// ProcessStorageMockExtendSubscriptionEndAtParamPtrs contains pointers to parameters of the ProcessStorage.ExtendSubscriptionEndAt
+type ProcessStorageMockExtendSubscriptionEndAtParamPtrs struct {
+	ctx      *context.Context
+	id       *string
+	newEndAt *time.Time
+}
+
+// ProcessStorageMockExtendSubscriptionEndAtResults contains results of the ProcessStorage.ExtendSubscriptionEndAt
+type ProcessStorageMockExtendSubscriptionEndAtResults struct {
+	err error
+}
+
+// ProcessStorageMockExtendSubscriptionEndAtOrigins contains origins of expectations of the ProcessStorage.ExtendSubscriptionEndAt
+type ProcessStorageMockExtendSubscriptionEndAtExpectationOrigins struct {
+	origin         string
+	originCtx      string
+	originId       string
+	originNewEndAt string
+}
+
+// Marks this method to be optional. The default behavior of any method with Return() is '1 or more', meaning
+// the test will fail minimock's automatic final call check if the mocked method was not called at least once.
+// Optional() makes method check to work in '0 or more' mode.
+// It is NOT RECOMMENDED to use this option unless you really need it, as default behaviour helps to
+// catch the problems when the expected method call is totally skipped during test run.
+func (mmExtendSubscriptionEndAt *mProcessStorageMockExtendSubscriptionEndAt) Optional() *mProcessStorageMockExtendSubscriptionEndAt {
+	mmExtendSubscriptionEndAt.optional = true
+	return mmExtendSubscriptionEndAt
+}
+
+// Expect sets up expected params for ProcessStorage.ExtendSubscriptionEndAt
+func (mmExtendSubscriptionEndAt *mProcessStorageMockExtendSubscriptionEndAt) Expect(ctx context.Context, id string, newEndAt time.Time) *mProcessStorageMockExtendSubscriptionEndAt {
+	if mmExtendSubscriptionEndAt.mock.funcExtendSubscriptionEndAt != nil {
+		mmExtendSubscriptionEndAt.mock.t.Fatalf("ProcessStorageMock.ExtendSubscriptionEndAt mock is already set by Set")
+	}
+
+	if mmExtendSubscriptionEndAt.defaultExpectation == nil {
+		mmExtendSubscriptionEndAt.defaultExpectation = &ProcessStorageMockExtendSubscriptionEndAtExpectation{}
+	}
+
+	if mmExtendSubscriptionEndAt.defaultExpectation.paramPtrs != nil {
+		mmExtendSubscriptionEndAt.mock.t.Fatalf("ProcessStorageMock.ExtendSubscriptionEndAt mock is already set by ExpectParams functions")
+	}
+
+	mmExtendSubscriptionEndAt.defaultExpectation.params = &ProcessStorageMockExtendSubscriptionEndAtParams{ctx, id, newEndAt}
+	mmExtendSubscriptionEndAt.defaultExpectation.expectationOrigins.origin = minimock.CallerInfo(1)
+	for _, e := range mmExtendSubscriptionEndAt.expectations {
+		if minimock.Equal(e.params, mmExtendSubscriptionEndAt.defaultExpectation.params) {
+			mmExtendSubscriptionEndAt.mock.t.Fatalf("Expectation set by When has same params: %#v", *mmExtendSubscriptionEndAt.defaultExpectation.params)
+		}
+	}
+
+	return mmExtendSubscriptionEndAt
+}
+
+// ExpectCtxParam1 sets up expected param ctx for ProcessStorage.ExtendSubscriptionEndAt
+func (mmExtendSubscriptionEndAt *mProcessStorageMockExtendSubscriptionEndAt) ExpectCtxParam1(ctx context.Context) *mProcessStorageMockExtendSubscriptionEndAt {
+	if mmExtendSubscriptionEndAt.mock.funcExtendSubscriptionEndAt != nil {
+		mmExtendSubscriptionEndAt.mock.t.Fatalf("ProcessStorageMock.ExtendSubscriptionEndAt mock is already set by Set")
+	}
+
+	if mmExtendSubscriptionEndAt.defaultExpectation == nil {
+		mmExtendSubscriptionEndAt.defaultExpectation = &ProcessStorageMockExtendSubscriptionEndAtExpectation{}
+	}
+
+	if mmExtendSubscriptionEndAt.defaultExpectation.params != nil {
+		mmExtendSubscriptionEndAt.mock.t.Fatalf("ProcessStorageMock.ExtendSubscriptionEndAt mock is already set by Expect")
+	}
+
+	if mmExtendSubscriptionEndAt.defaultExpectation.paramPtrs == nil {
+		mmExtendSubscriptionEndAt.defaultExpectation.paramPtrs = &ProcessStorageMockExtendSubscriptionEndAtParamPtrs{}
+	}
+	mmExtendSubscriptionEndAt.defaultExpectation.paramPtrs.ctx = &ctx
+	mmExtendSubscriptionEndAt.defaultExpectation.expectationOrigins.originCtx = minimock.CallerInfo(1)
+
+	return mmExtendSubscriptionEndAt
+}
+
+// ExpectIdParam2 sets up expected param id for ProcessStorage.ExtendSubscriptionEndAt
+func (mmExtendSubscriptionEndAt *mProcessStorageMockExtendSubscriptionEndAt) ExpectIdParam2(id string) *mProcessStorageMockExtendSubscriptionEndAt {
+	if mmExtendSubscriptionEndAt.mock.funcExtendSubscriptionEndAt != nil {
+		mmExtendSubscriptionEndAt.mock.t.Fatalf("ProcessStorageMock.ExtendSubscriptionEndAt mock is already set by Set")
+	}
+
+	if mmExtendSubscriptionEndAt.defaultExpectation == nil {
+		mmExtendSubscriptionEndAt.defaultExpectation = &ProcessStorageMockExtendSubscriptionEndAtExpectation{}
+	}
+
+	if mmExtendSubscriptionEndAt.defaultExpectation.params != nil {
+		mmExtendSubscriptionEndAt.mock.t.Fatalf("ProcessStorageMock.ExtendSubscriptionEndAt mock is already set by Expect")
+	}
+
+	if mmExtendSubscriptionEndAt.defaultExpectation.paramPtrs == nil {
+		mmExtendSubscriptionEndAt.defaultExpectation.paramPtrs = &ProcessStorageMockExtendSubscriptionEndAtParamPtrs{}
+	}
+	mmExtendSubscriptionEndAt.defaultExpectation.paramPtrs.id = &id
+	mmExtendSubscriptionEndAt.defaultExpectation.expectationOrigins.originId = minimock.CallerInfo(1)
+
+	return mmExtendSubscriptionEndAt
+}
+
+// ExpectNewEndAtParam3 sets up expected param newEndAt for ProcessStorage.ExtendSubscriptionEndAt
+func (mmExtendSubscriptionEndAt *mProcessStorageMockExtendSubscriptionEndAt) ExpectNewEndAtParam3(newEndAt time.Time) *mProcessStorageMockExtendSubscriptionEndAt {
+	if mmExtendSubscriptionEndAt.mock.funcExtendSubscriptionEndAt != nil {
+		mmExtendSubscriptionEndAt.mock.t.Fatalf("ProcessStorageMock.ExtendSubscriptionEndAt mock is already set by Set")
+	}
+
+	if mmExtendSubscriptionEndAt.defaultExpectation == nil {
+		mmExtendSubscriptionEndAt.defaultExpectation = &ProcessStorageMockExtendSubscriptionEndAtExpectation{}
+	}
+
+	if mmExtendSubscriptionEndAt.defaultExpectation.params != nil {
+		mmExtendSubscriptionEndAt.mock.t.Fatalf("ProcessStorageMock.ExtendSubscriptionEndAt mock is already set by Expect")
+	}
+
+	if mmExtendSubscriptionEndAt.defaultExpectation.paramPtrs == nil {
+		mmExtendSubscriptionEndAt.defaultExpectation.paramPtrs = &ProcessStorageMockExtendSubscriptionEndAtParamPtrs{}
+	}
+	mmExtendSubscriptionEndAt.defaultExpectation.paramPtrs.newEndAt = &newEndAt
+	mmExtendSubscriptionEndAt.defaultExpectation.expectationOrigins.originNewEndAt = minimock.CallerInfo(1)
+
+	return mmExtendSubscriptionEndAt
+}
+
+// Inspect accepts an inspector function that has same arguments as the ProcessStorage.ExtendSubscriptionEndAt
+func (mmExtendSubscriptionEndAt *mProcessStorageMockExtendSubscriptionEndAt) Inspect(f func(ctx context.Context, id string, newEndAt time.Time)) *mProcessStorageMockExtendSubscriptionEndAt {
+	if mmExtendSubscriptionEndAt.mock.inspectFuncExtendSubscriptionEndAt != nil {
+		mmExtendSubscriptionEndAt.mock.t.Fatalf("Inspect function is already set for ProcessStorageMock.ExtendSubscriptionEndAt")
+	}
+
+	mmExtendSubscriptionEndAt.mock.inspectFuncExtendSubscriptionEndAt = f
+
+	return mmExtendSubscriptionEndAt
+}
+
+// Return sets up results that will be returned by ProcessStorage.ExtendSubscriptionEndAt
+func (mmExtendSubscriptionEndAt *mProcessStorageMockExtendSubscriptionEndAt) Return(err error) *ProcessStorageMock {
+	if mmExtendSubscriptionEndAt.mock.funcExtendSubscriptionEndAt != nil {
+		mmExtendSubscriptionEndAt.mock.t.Fatalf("ProcessStorageMock.ExtendSubscriptionEndAt mock is already set by Set")
+	}
+
+	if mmExtendSubscriptionEndAt.defaultExpectation == nil {
+		mmExtendSubscriptionEndAt.defaultExpectation = &ProcessStorageMockExtendSubscriptionEndAtExpectation{mock: mmExtendSubscriptionEndAt.mock}
+	}
+	mmExtendSubscriptionEndAt.defaultExpectation.results = &ProcessStorageMockExtendSubscriptionEndAtResults{err}
+	mmExtendSubscriptionEndAt.defaultExpectation.returnOrigin = minimock.CallerInfo(1)
+	return mmExtendSubscriptionEndAt.mock
+}
+
+// Set uses given function f to mock the ProcessStorage.ExtendSubscriptionEndAt method
+func (mmExtendSubscriptionEndAt *mProcessStorageMockExtendSubscriptionEndAt) Set(f func(ctx context.Context, id string, newEndAt time.Time) (err error)) *ProcessStorageMock {
+	if mmExtendSubscriptionEndAt.defaultExpectation != nil {
+		mmExtendSubscriptionEndAt.mock.t.Fatalf("Default expectation is already set for the ProcessStorage.ExtendSubscriptionEndAt method")
+	}
+
+	if len(mmExtendSubscriptionEndAt.expectations) > 0 {
+		mmExtendSubscriptionEndAt.mock.t.Fatalf("Some expectations are already set for the ProcessStorage.ExtendSubscriptionEndAt method")
+	}
+
+	mmExtendSubscriptionEndAt.mock.funcExtendSubscriptionEndAt = f
+	mmExtendSubscriptionEndAt.mock.funcExtendSubscriptionEndAtOrigin = minimock.CallerInfo(1)
+	return mmExtendSubscriptionEndAt.mock
+}
+
+// When sets expectation for the ProcessStorage.ExtendSubscriptionEndAt which will trigger the result defined by the following
+// Then helper
+func (mmExtendSubscriptionEndAt *mProcessStorageMockExtendSubscriptionEndAt) When(ctx context.Context, id string, newEndAt time.Time) *ProcessStorageMockExtendSubscriptionEndAtExpectation {
+	if mmExtendSubscriptionEndAt.mock.funcExtendSubscriptionEndAt != nil {
+		mmExtendSubscriptionEndAt.mock.t.Fatalf("ProcessStorageMock.ExtendSubscriptionEndAt mock is already set by Set")
+	}
+
+	expectation := &ProcessStorageMockExtendSubscriptionEndAtExpectation{
+		mock:               mmExtendSubscriptionEndAt.mock,
+		params:             &ProcessStorageMockExtendSubscriptionEndAtParams{ctx, id, newEndAt},
+		expectationOrigins: ProcessStorageMockExtendSubscriptionEndAtExpectationOrigins{origin: minimock.CallerInfo(1)},
+	}
+	mmExtendSubscriptionEndAt.expectations = append(mmExtendSubscriptionEndAt.expectations, expectation)
+	return expectation
+}
+
+// Then sets up ProcessStorage.ExtendSubscriptionEndAt return parameters for the expectation previously defined by the When method
+func (e *ProcessStorageMockExtendSubscriptionEndAtExpectation) Then(err error) *ProcessStorageMock {
+	e.results = &ProcessStorageMockExtendSubscriptionEndAtResults{err}
+	return e.mock
+}
+
+// Times sets number of times ProcessStorage.ExtendSubscriptionEndAt should be invoked
+func (mmExtendSubscriptionEndAt *mProcessStorageMockExtendSubscriptionEndAt) Times(n uint64) *mProcessStorageMockExtendSubscriptionEndAt {
+	if n == 0 {
+		mmExtendSubscriptionEndAt.mock.t.Fatalf("Times of ProcessStorageMock.ExtendSubscriptionEndAt mock can not be zero")
+	}
+	mm_atomic.StoreUint64(&mmExtendSubscriptionEndAt.expectedInvocations, n)
+	mmExtendSubscriptionEndAt.expectedInvocationsOrigin = minimock.CallerInfo(1)
+	return mmExtendSubscriptionEndAt
+}
+
+func (mmExtendSubscriptionEndAt *mProcessStorageMockExtendSubscriptionEndAt) invocationsDone() bool {
+	if len(mmExtendSubscriptionEndAt.expectations) == 0 && mmExtendSubscriptionEndAt.defaultExpectation == nil && mmExtendSubscriptionEndAt.mock.funcExtendSubscriptionEndAt == nil {
+		return true
+	}
+
+	totalInvocations := mm_atomic.LoadUint64(&mmExtendSubscriptionEndAt.mock.afterExtendSubscriptionEndAtCounter)
+	expectedInvocations := mm_atomic.LoadUint64(&mmExtendSubscriptionEndAt.expectedInvocations)
+
+	return totalInvocations > 0 && (expectedInvocations == 0 || expectedInvocations == totalInvocations)
+}
+
+// ExtendSubscriptionEndAt implements mm_service.ProcessStorage
+func (mmExtendSubscriptionEndAt *ProcessStorageMock) ExtendSubscriptionEndAt(ctx context.Context, id string, newEndAt time.Time) (err error) {
+	mm_atomic.AddUint64(&mmExtendSubscriptionEndAt.beforeExtendSubscriptionEndAtCounter, 1)
+	defer mm_atomic.AddUint64(&mmExtendSubscriptionEndAt.afterExtendSubscriptionEndAtCounter, 1)
+
+	mmExtendSubscriptionEndAt.t.Helper()
+
+	if mmExtendSubscriptionEndAt.inspectFuncExtendSubscriptionEndAt != nil {
+		mmExtendSubscriptionEndAt.inspectFuncExtendSubscriptionEndAt(ctx, id, newEndAt)
+	}
+
+	mm_params := ProcessStorageMockExtendSubscriptionEndAtParams{ctx, id, newEndAt}
+
+	// Record call args
+	mmExtendSubscriptionEndAt.ExtendSubscriptionEndAtMock.mutex.Lock()
+	mmExtendSubscriptionEndAt.ExtendSubscriptionEndAtMock.callArgs = append(mmExtendSubscriptionEndAt.ExtendSubscriptionEndAtMock.callArgs, &mm_params)
+	mmExtendSubscriptionEndAt.ExtendSubscriptionEndAtMock.mutex.Unlock()
+
+	for _, e := range mmExtendSubscriptionEndAt.ExtendSubscriptionEndAtMock.expectations {
+		if minimock.Equal(*e.params, mm_params) {
+			mm_atomic.AddUint64(&e.Counter, 1)
+			return e.results.err
+		}
+	}
+
+	if mmExtendSubscriptionEndAt.ExtendSubscriptionEndAtMock.defaultExpectation != nil {
+		mm_atomic.AddUint64(&mmExtendSubscriptionEndAt.ExtendSubscriptionEndAtMock.defaultExpectation.Counter, 1)
+		mm_want := mmExtendSubscriptionEndAt.ExtendSubscriptionEndAtMock.defaultExpectation.params
+		mm_want_ptrs := mmExtendSubscriptionEndAt.ExtendSubscriptionEndAtMock.defaultExpectation.paramPtrs
+
+		mm_got := ProcessStorageMockExtendSubscriptionEndAtParams{ctx, id, newEndAt}
+
+		if mm_want_ptrs != nil {
+
+			if mm_want_ptrs.ctx != nil && !minimock.Equal(*mm_want_ptrs.ctx, mm_got.ctx) {
+				mmExtendSubscriptionEndAt.t.Errorf("ProcessStorageMock.ExtendSubscriptionEndAt got unexpected parameter ctx, expected at\n%s:\nwant: %#v\n got: %#v%s\n",
+					mmExtendSubscriptionEndAt.ExtendSubscriptionEndAtMock.defaultExpectation.expectationOrigins.originCtx, *mm_want_ptrs.ctx, mm_got.ctx, minimock.Diff(*mm_want_ptrs.ctx, mm_got.ctx))
+			}
+
+			if mm_want_ptrs.id != nil && !minimock.Equal(*mm_want_ptrs.id, mm_got.id) {
+				mmExtendSubscriptionEndAt.t.Errorf("ProcessStorageMock.ExtendSubscriptionEndAt got unexpected parameter id, expected at\n%s:\nwant: %#v\n got: %#v%s\n",
+					mmExtendSubscriptionEndAt.ExtendSubscriptionEndAtMock.defaultExpectation.expectationOrigins.originId, *mm_want_ptrs.id, mm_got.id, minimock.Diff(*mm_want_ptrs.id, mm_got.id))
+			}
+
+			if mm_want_ptrs.newEndAt != nil && !minimock.Equal(*mm_want_ptrs.newEndAt, mm_got.newEndAt) {
+				mmExtendSubscriptionEndAt.t.Errorf("ProcessStorageMock.ExtendSubscriptionEndAt got unexpected parameter newEndAt, expected at\n%s:\nwant: %#v\n got: %#v%s\n",
+					mmExtendSubscriptionEndAt.ExtendSubscriptionEndAtMock.defaultExpectation.expectationOrigins.originNewEndAt, *mm_want_ptrs.newEndAt, mm_got.newEndAt, minimock.Diff(*mm_want_ptrs.newEndAt, mm_got.newEndAt))
+			}
+
+		} else if mm_want != nil && !minimock.Equal(*mm_want, mm_got) {
+			mmExtendSubscriptionEndAt.t.Errorf("ProcessStorageMock.ExtendSubscriptionEndAt got unexpected parameters, expected at\n%s:\nwant: %#v\n got: %#v%s\n",
+				mmExtendSubscriptionEndAt.ExtendSubscriptionEndAtMock.defaultExpectation.expectationOrigins.origin, *mm_want, mm_got, minimock.Diff(*mm_want, mm_got))
+		}
+
+		mm_results := mmExtendSubscriptionEndAt.ExtendSubscriptionEndAtMock.defaultExpectation.results
+		if mm_results == nil {
+			mmExtendSubscriptionEndAt.t.Fatal("No results are set for the ProcessStorageMock.ExtendSubscriptionEndAt")
+		}
+		return (*mm_results).err
+	}
+	if mmExtendSubscriptionEndAt.funcExtendSubscriptionEndAt != nil {
+		return mmExtendSubscriptionEndAt.funcExtendSubscriptionEndAt(ctx, id, newEndAt)
+	}
+	mmExtendSubscriptionEndAt.t.Fatalf("Unexpected call to ProcessStorageMock.ExtendSubscriptionEndAt. %v %v %v", ctx, id, newEndAt)
+	return
+}
+
+// ExtendSubscriptionEndAtAfterCounter returns a count of finished ProcessStorageMock.ExtendSubscriptionEndAt invocations
+func (mmExtendSubscriptionEndAt *ProcessStorageMock) ExtendSubscriptionEndAtAfterCounter() uint64 {
+	return mm_atomic.LoadUint64(&mmExtendSubscriptionEndAt.afterExtendSubscriptionEndAtCounter)
+}
+
+// ExtendSubscriptionEndAtBeforeCounter returns a count of ProcessStorageMock.ExtendSubscriptionEndAt invocations
+func (mmExtendSubscriptionEndAt *ProcessStorageMock) ExtendSubscriptionEndAtBeforeCounter() uint64 {
+	return mm_atomic.LoadUint64(&mmExtendSubscriptionEndAt.beforeExtendSubscriptionEndAtCounter)
+}
+
+// Calls returns a list of arguments used in each call to ProcessStorageMock.ExtendSubscriptionEndAt.
+// The list is in the same order as the calls were made (i.e. recent calls have a higher index)
+func (mmExtendSubscriptionEndAt *mProcessStorageMockExtendSubscriptionEndAt) Calls() []*ProcessStorageMockExtendSubscriptionEndAtParams {
+	mmExtendSubscriptionEndAt.mutex.RLock()
+
+	argCopy := make([]*ProcessStorageMockExtendSubscriptionEndAtParams, len(mmExtendSubscriptionEndAt.callArgs))
+	copy(argCopy, mmExtendSubscriptionEndAt.callArgs)
+
+	mmExtendSubscriptionEndAt.mutex.RUnlock()
+
+	return argCopy
+}
+
+// MinimockExtendSubscriptionEndAtDone returns true if the count of the ExtendSubscriptionEndAt invocations corresponds
+// the number of defined expectations
+func (m *ProcessStorageMock) MinimockExtendSubscriptionEndAtDone() bool {
+	if m.ExtendSubscriptionEndAtMock.optional {
+		// Optional methods provide '0 or more' call count restriction.
+		return true
+	}
+
+	for _, e := range m.ExtendSubscriptionEndAtMock.expectations {
+		if mm_atomic.LoadUint64(&e.Counter) < 1 {
+			return false
+		}
+	}
+
+	return m.ExtendSubscriptionEndAtMock.invocationsDone()
+}
+
+// MinimockExtendSubscriptionEndAtInspect logs each unmet expectation
+func (m *ProcessStorageMock) MinimockExtendSubscriptionEndAtInspect() {
+	for _, e := range m.ExtendSubscriptionEndAtMock.expectations {
+		if mm_atomic.LoadUint64(&e.Counter) < 1 {
+			m.t.Errorf("Expected call to ProcessStorageMock.ExtendSubscriptionEndAt at\n%s with params: %#v", e.expectationOrigins.origin, *e.params)
+		}
+	}
+
+	afterExtendSubscriptionEndAtCounter := mm_atomic.LoadUint64(&m.afterExtendSubscriptionEndAtCounter)
+	// if default expectation was set then invocations count should be greater than zero
+	if m.ExtendSubscriptionEndAtMock.defaultExpectation != nil && afterExtendSubscriptionEndAtCounter < 1 {
+		if m.ExtendSubscriptionEndAtMock.defaultExpectation.params == nil {
+			m.t.Errorf("Expected call to ProcessStorageMock.ExtendSubscriptionEndAt at\n%s", m.ExtendSubscriptionEndAtMock.defaultExpectation.returnOrigin)
+		} else {
+			m.t.Errorf("Expected call to ProcessStorageMock.ExtendSubscriptionEndAt at\n%s with params: %#v", m.ExtendSubscriptionEndAtMock.defaultExpectation.expectationOrigins.origin, *m.ExtendSubscriptionEndAtMock.defaultExpectation.params)
+		}
+	}
+	// if func was set then invocations count should be greater than zero
+	if m.funcExtendSubscriptionEndAt != nil && afterExtendSubscriptionEndAtCounter < 1 {
+		m.t.Errorf("Expected call to ProcessStorageMock.ExtendSubscriptionEndAt at\n%s", m.funcExtendSubscriptionEndAtOrigin)
+	}
+
+	if !m.ExtendSubscriptionEndAtMock.invocationsDone() && afterExtendSubscriptionEndAtCounter > 0 {
+		m.t.Errorf("Expected %d calls to ProcessStorageMock.ExtendSubscriptionEndAt at\n%s but found %d calls",
+			mm_atomic.LoadUint64(&m.ExtendSubscriptionEndAtMock.expectedInvocations), m.ExtendSubscriptionEndAtMock.expectedInvocationsOrigin, afterExtendSubscriptionEndAtCounter)
 	}
 }
 
@@ -1142,6 +1536,349 @@ func (m *ProcessStorageMock) MinimockGetPlanByIDInspect() {
 	}
 }
 
+type mProcessStorageMockGetSubscriptionByIDForUpdate struct {
+	optional           bool
+	mock               *ProcessStorageMock
+	defaultExpectation *ProcessStorageMockGetSubscriptionByIDForUpdateExpectation
+	expectations       []*ProcessStorageMockGetSubscriptionByIDForUpdateExpectation
+
+	callArgs []*ProcessStorageMockGetSubscriptionByIDForUpdateParams
+	mutex    sync.RWMutex
+
+	expectedInvocations       uint64
+	expectedInvocationsOrigin string
+}
+
+// ProcessStorageMockGetSubscriptionByIDForUpdateExpectation specifies expectation struct of the ProcessStorage.GetSubscriptionByIDForUpdate
+type ProcessStorageMockGetSubscriptionByIDForUpdateExpectation struct {
+	mock               *ProcessStorageMock
+	params             *ProcessStorageMockGetSubscriptionByIDForUpdateParams
+	paramPtrs          *ProcessStorageMockGetSubscriptionByIDForUpdateParamPtrs
+	expectationOrigins ProcessStorageMockGetSubscriptionByIDForUpdateExpectationOrigins
+	results            *ProcessStorageMockGetSubscriptionByIDForUpdateResults
+	returnOrigin       string
+	Counter            uint64
+}
+
+// ProcessStorageMockGetSubscriptionByIDForUpdateParams contains parameters of the ProcessStorage.GetSubscriptionByIDForUpdate
+type ProcessStorageMockGetSubscriptionByIDForUpdateParams struct {
+	ctx context.Context
+	id  string
+}
+
+// ProcessStorageMockGetSubscriptionByIDForUpdateParamPtrs contains pointers to parameters of the ProcessStorage.GetSubscriptionByIDForUpdate
+type ProcessStorageMockGetSubscriptionByIDForUpdateParamPtrs struct {
+	ctx *context.Context
+	id  *string
+}
+
+// ProcessStorageMockGetSubscriptionByIDForUpdateResults contains results of the ProcessStorage.GetSubscriptionByIDForUpdate
+type ProcessStorageMockGetSubscriptionByIDForUpdateResults struct {
+	sp1 *model.SubscriptionWithPlan
+	err error
+}
+
+// ProcessStorageMockGetSubscriptionByIDForUpdateOrigins contains origins of expectations of the ProcessStorage.GetSubscriptionByIDForUpdate
+type ProcessStorageMockGetSubscriptionByIDForUpdateExpectationOrigins struct {
+	origin    string
+	originCtx string
+	originId  string
+}
+
+// Marks this method to be optional. The default behavior of any method with Return() is '1 or more', meaning
+// the test will fail minimock's automatic final call check if the mocked method was not called at least once.
+// Optional() makes method check to work in '0 or more' mode.
+// It is NOT RECOMMENDED to use this option unless you really need it, as default behaviour helps to
+// catch the problems when the expected method call is totally skipped during test run.
+func (mmGetSubscriptionByIDForUpdate *mProcessStorageMockGetSubscriptionByIDForUpdate) Optional() *mProcessStorageMockGetSubscriptionByIDForUpdate {
+	mmGetSubscriptionByIDForUpdate.optional = true
+	return mmGetSubscriptionByIDForUpdate
+}
+
+// Expect sets up expected params for ProcessStorage.GetSubscriptionByIDForUpdate
+func (mmGetSubscriptionByIDForUpdate *mProcessStorageMockGetSubscriptionByIDForUpdate) Expect(ctx context.Context, id string) *mProcessStorageMockGetSubscriptionByIDForUpdate {
+	if mmGetSubscriptionByIDForUpdate.mock.funcGetSubscriptionByIDForUpdate != nil {
+		mmGetSubscriptionByIDForUpdate.mock.t.Fatalf("ProcessStorageMock.GetSubscriptionByIDForUpdate mock is already set by Set")
+	}
+
+	if mmGetSubscriptionByIDForUpdate.defaultExpectation == nil {
+		mmGetSubscriptionByIDForUpdate.defaultExpectation = &ProcessStorageMockGetSubscriptionByIDForUpdateExpectation{}
+	}
+
+	if mmGetSubscriptionByIDForUpdate.defaultExpectation.paramPtrs != nil {
+		mmGetSubscriptionByIDForUpdate.mock.t.Fatalf("ProcessStorageMock.GetSubscriptionByIDForUpdate mock is already set by ExpectParams functions")
+	}
+
+	mmGetSubscriptionByIDForUpdate.defaultExpectation.params = &ProcessStorageMockGetSubscriptionByIDForUpdateParams{ctx, id}
+	mmGetSubscriptionByIDForUpdate.defaultExpectation.expectationOrigins.origin = minimock.CallerInfo(1)
+	for _, e := range mmGetSubscriptionByIDForUpdate.expectations {
+		if minimock.Equal(e.params, mmGetSubscriptionByIDForUpdate.defaultExpectation.params) {
+			mmGetSubscriptionByIDForUpdate.mock.t.Fatalf("Expectation set by When has same params: %#v", *mmGetSubscriptionByIDForUpdate.defaultExpectation.params)
+		}
+	}
+
+	return mmGetSubscriptionByIDForUpdate
+}
+
+// ExpectCtxParam1 sets up expected param ctx for ProcessStorage.GetSubscriptionByIDForUpdate
+func (mmGetSubscriptionByIDForUpdate *mProcessStorageMockGetSubscriptionByIDForUpdate) ExpectCtxParam1(ctx context.Context) *mProcessStorageMockGetSubscriptionByIDForUpdate {
+	if mmGetSubscriptionByIDForUpdate.mock.funcGetSubscriptionByIDForUpdate != nil {
+		mmGetSubscriptionByIDForUpdate.mock.t.Fatalf("ProcessStorageMock.GetSubscriptionByIDForUpdate mock is already set by Set")
+	}
+
+	if mmGetSubscriptionByIDForUpdate.defaultExpectation == nil {
+		mmGetSubscriptionByIDForUpdate.defaultExpectation = &ProcessStorageMockGetSubscriptionByIDForUpdateExpectation{}
+	}
+
+	if mmGetSubscriptionByIDForUpdate.defaultExpectation.params != nil {
+		mmGetSubscriptionByIDForUpdate.mock.t.Fatalf("ProcessStorageMock.GetSubscriptionByIDForUpdate mock is already set by Expect")
+	}
+
+	if mmGetSubscriptionByIDForUpdate.defaultExpectation.paramPtrs == nil {
+		mmGetSubscriptionByIDForUpdate.defaultExpectation.paramPtrs = &ProcessStorageMockGetSubscriptionByIDForUpdateParamPtrs{}
+	}
+	mmGetSubscriptionByIDForUpdate.defaultExpectation.paramPtrs.ctx = &ctx
+	mmGetSubscriptionByIDForUpdate.defaultExpectation.expectationOrigins.originCtx = minimock.CallerInfo(1)
+
+	return mmGetSubscriptionByIDForUpdate
+}
+
+// ExpectIdParam2 sets up expected param id for ProcessStorage.GetSubscriptionByIDForUpdate
+func (mmGetSubscriptionByIDForUpdate *mProcessStorageMockGetSubscriptionByIDForUpdate) ExpectIdParam2(id string) *mProcessStorageMockGetSubscriptionByIDForUpdate {
+	if mmGetSubscriptionByIDForUpdate.mock.funcGetSubscriptionByIDForUpdate != nil {
+		mmGetSubscriptionByIDForUpdate.mock.t.Fatalf("ProcessStorageMock.GetSubscriptionByIDForUpdate mock is already set by Set")
+	}
+
+	if mmGetSubscriptionByIDForUpdate.defaultExpectation == nil {
+		mmGetSubscriptionByIDForUpdate.defaultExpectation = &ProcessStorageMockGetSubscriptionByIDForUpdateExpectation{}
+	}
+
+	if mmGetSubscriptionByIDForUpdate.defaultExpectation.params != nil {
+		mmGetSubscriptionByIDForUpdate.mock.t.Fatalf("ProcessStorageMock.GetSubscriptionByIDForUpdate mock is already set by Expect")
+	}
+
+	if mmGetSubscriptionByIDForUpdate.defaultExpectation.paramPtrs == nil {
+		mmGetSubscriptionByIDForUpdate.defaultExpectation.paramPtrs = &ProcessStorageMockGetSubscriptionByIDForUpdateParamPtrs{}
+	}
+	mmGetSubscriptionByIDForUpdate.defaultExpectation.paramPtrs.id = &id
+	mmGetSubscriptionByIDForUpdate.defaultExpectation.expectationOrigins.originId = minimock.CallerInfo(1)
+
+	return mmGetSubscriptionByIDForUpdate
+}
+
+// Inspect accepts an inspector function that has same arguments as the ProcessStorage.GetSubscriptionByIDForUpdate
+func (mmGetSubscriptionByIDForUpdate *mProcessStorageMockGetSubscriptionByIDForUpdate) Inspect(f func(ctx context.Context, id string)) *mProcessStorageMockGetSubscriptionByIDForUpdate {
+	if mmGetSubscriptionByIDForUpdate.mock.inspectFuncGetSubscriptionByIDForUpdate != nil {
+		mmGetSubscriptionByIDForUpdate.mock.t.Fatalf("Inspect function is already set for ProcessStorageMock.GetSubscriptionByIDForUpdate")
+	}
+
+	mmGetSubscriptionByIDForUpdate.mock.inspectFuncGetSubscriptionByIDForUpdate = f
+
+	return mmGetSubscriptionByIDForUpdate
+}
+
+// Return sets up results that will be returned by ProcessStorage.GetSubscriptionByIDForUpdate
+func (mmGetSubscriptionByIDForUpdate *mProcessStorageMockGetSubscriptionByIDForUpdate) Return(sp1 *model.SubscriptionWithPlan, err error) *ProcessStorageMock {
+	if mmGetSubscriptionByIDForUpdate.mock.funcGetSubscriptionByIDForUpdate != nil {
+		mmGetSubscriptionByIDForUpdate.mock.t.Fatalf("ProcessStorageMock.GetSubscriptionByIDForUpdate mock is already set by Set")
+	}
+
+	if mmGetSubscriptionByIDForUpdate.defaultExpectation == nil {
+		mmGetSubscriptionByIDForUpdate.defaultExpectation = &ProcessStorageMockGetSubscriptionByIDForUpdateExpectation{mock: mmGetSubscriptionByIDForUpdate.mock}
+	}
+	mmGetSubscriptionByIDForUpdate.defaultExpectation.results = &ProcessStorageMockGetSubscriptionByIDForUpdateResults{sp1, err}
+	mmGetSubscriptionByIDForUpdate.defaultExpectation.returnOrigin = minimock.CallerInfo(1)
+	return mmGetSubscriptionByIDForUpdate.mock
+}
+
+// Set uses given function f to mock the ProcessStorage.GetSubscriptionByIDForUpdate method
+func (mmGetSubscriptionByIDForUpdate *mProcessStorageMockGetSubscriptionByIDForUpdate) Set(f func(ctx context.Context, id string) (sp1 *model.SubscriptionWithPlan, err error)) *ProcessStorageMock {
+	if mmGetSubscriptionByIDForUpdate.defaultExpectation != nil {
+		mmGetSubscriptionByIDForUpdate.mock.t.Fatalf("Default expectation is already set for the ProcessStorage.GetSubscriptionByIDForUpdate method")
+	}
+
+	if len(mmGetSubscriptionByIDForUpdate.expectations) > 0 {
+		mmGetSubscriptionByIDForUpdate.mock.t.Fatalf("Some expectations are already set for the ProcessStorage.GetSubscriptionByIDForUpdate method")
+	}
+
+	mmGetSubscriptionByIDForUpdate.mock.funcGetSubscriptionByIDForUpdate = f
+	mmGetSubscriptionByIDForUpdate.mock.funcGetSubscriptionByIDForUpdateOrigin = minimock.CallerInfo(1)
+	return mmGetSubscriptionByIDForUpdate.mock
+}
+
+// When sets expectation for the ProcessStorage.GetSubscriptionByIDForUpdate which will trigger the result defined by the following
+// Then helper
+func (mmGetSubscriptionByIDForUpdate *mProcessStorageMockGetSubscriptionByIDForUpdate) When(ctx context.Context, id string) *ProcessStorageMockGetSubscriptionByIDForUpdateExpectation {
+	if mmGetSubscriptionByIDForUpdate.mock.funcGetSubscriptionByIDForUpdate != nil {
+		mmGetSubscriptionByIDForUpdate.mock.t.Fatalf("ProcessStorageMock.GetSubscriptionByIDForUpdate mock is already set by Set")
+	}
+
+	expectation := &ProcessStorageMockGetSubscriptionByIDForUpdateExpectation{
+		mock:               mmGetSubscriptionByIDForUpdate.mock,
+		params:             &ProcessStorageMockGetSubscriptionByIDForUpdateParams{ctx, id},
+		expectationOrigins: ProcessStorageMockGetSubscriptionByIDForUpdateExpectationOrigins{origin: minimock.CallerInfo(1)},
+	}
+	mmGetSubscriptionByIDForUpdate.expectations = append(mmGetSubscriptionByIDForUpdate.expectations, expectation)
+	return expectation
+}
+
+// Then sets up ProcessStorage.GetSubscriptionByIDForUpdate return parameters for the expectation previously defined by the When method
+func (e *ProcessStorageMockGetSubscriptionByIDForUpdateExpectation) Then(sp1 *model.SubscriptionWithPlan, err error) *ProcessStorageMock {
+	e.results = &ProcessStorageMockGetSubscriptionByIDForUpdateResults{sp1, err}
+	return e.mock
+}
+
+// Times sets number of times ProcessStorage.GetSubscriptionByIDForUpdate should be invoked
+func (mmGetSubscriptionByIDForUpdate *mProcessStorageMockGetSubscriptionByIDForUpdate) Times(n uint64) *mProcessStorageMockGetSubscriptionByIDForUpdate {
+	if n == 0 {
+		mmGetSubscriptionByIDForUpdate.mock.t.Fatalf("Times of ProcessStorageMock.GetSubscriptionByIDForUpdate mock can not be zero")
+	}
+	mm_atomic.StoreUint64(&mmGetSubscriptionByIDForUpdate.expectedInvocations, n)
+	mmGetSubscriptionByIDForUpdate.expectedInvocationsOrigin = minimock.CallerInfo(1)
+	return mmGetSubscriptionByIDForUpdate
+}
+
+func (mmGetSubscriptionByIDForUpdate *mProcessStorageMockGetSubscriptionByIDForUpdate) invocationsDone() bool {
+	if len(mmGetSubscriptionByIDForUpdate.expectations) == 0 && mmGetSubscriptionByIDForUpdate.defaultExpectation == nil && mmGetSubscriptionByIDForUpdate.mock.funcGetSubscriptionByIDForUpdate == nil {
+		return true
+	}
+
+	totalInvocations := mm_atomic.LoadUint64(&mmGetSubscriptionByIDForUpdate.mock.afterGetSubscriptionByIDForUpdateCounter)
+	expectedInvocations := mm_atomic.LoadUint64(&mmGetSubscriptionByIDForUpdate.expectedInvocations)
+
+	return totalInvocations > 0 && (expectedInvocations == 0 || expectedInvocations == totalInvocations)
+}
+
+// GetSubscriptionByIDForUpdate implements mm_service.ProcessStorage
+func (mmGetSubscriptionByIDForUpdate *ProcessStorageMock) GetSubscriptionByIDForUpdate(ctx context.Context, id string) (sp1 *model.SubscriptionWithPlan, err error) {
+	mm_atomic.AddUint64(&mmGetSubscriptionByIDForUpdate.beforeGetSubscriptionByIDForUpdateCounter, 1)
+	defer mm_atomic.AddUint64(&mmGetSubscriptionByIDForUpdate.afterGetSubscriptionByIDForUpdateCounter, 1)
+
+	mmGetSubscriptionByIDForUpdate.t.Helper()
+
+	if mmGetSubscriptionByIDForUpdate.inspectFuncGetSubscriptionByIDForUpdate != nil {
+		mmGetSubscriptionByIDForUpdate.inspectFuncGetSubscriptionByIDForUpdate(ctx, id)
+	}
+
+	mm_params := ProcessStorageMockGetSubscriptionByIDForUpdateParams{ctx, id}
+
+	// Record call args
+	mmGetSubscriptionByIDForUpdate.GetSubscriptionByIDForUpdateMock.mutex.Lock()
+	mmGetSubscriptionByIDForUpdate.GetSubscriptionByIDForUpdateMock.callArgs = append(mmGetSubscriptionByIDForUpdate.GetSubscriptionByIDForUpdateMock.callArgs, &mm_params)
+	mmGetSubscriptionByIDForUpdate.GetSubscriptionByIDForUpdateMock.mutex.Unlock()
+
+	for _, e := range mmGetSubscriptionByIDForUpdate.GetSubscriptionByIDForUpdateMock.expectations {
+		if minimock.Equal(*e.params, mm_params) {
+			mm_atomic.AddUint64(&e.Counter, 1)
+			return e.results.sp1, e.results.err
+		}
+	}
+
+	if mmGetSubscriptionByIDForUpdate.GetSubscriptionByIDForUpdateMock.defaultExpectation != nil {
+		mm_atomic.AddUint64(&mmGetSubscriptionByIDForUpdate.GetSubscriptionByIDForUpdateMock.defaultExpectation.Counter, 1)
+		mm_want := mmGetSubscriptionByIDForUpdate.GetSubscriptionByIDForUpdateMock.defaultExpectation.params
+		mm_want_ptrs := mmGetSubscriptionByIDForUpdate.GetSubscriptionByIDForUpdateMock.defaultExpectation.paramPtrs
+
+		mm_got := ProcessStorageMockGetSubscriptionByIDForUpdateParams{ctx, id}
+
+		if mm_want_ptrs != nil {
+
+			if mm_want_ptrs.ctx != nil && !minimock.Equal(*mm_want_ptrs.ctx, mm_got.ctx) {
+				mmGetSubscriptionByIDForUpdate.t.Errorf("ProcessStorageMock.GetSubscriptionByIDForUpdate got unexpected parameter ctx, expected at\n%s:\nwant: %#v\n got: %#v%s\n",
+					mmGetSubscriptionByIDForUpdate.GetSubscriptionByIDForUpdateMock.defaultExpectation.expectationOrigins.originCtx, *mm_want_ptrs.ctx, mm_got.ctx, minimock.Diff(*mm_want_ptrs.ctx, mm_got.ctx))
+			}
+
+			if mm_want_ptrs.id != nil && !minimock.Equal(*mm_want_ptrs.id, mm_got.id) {
+				mmGetSubscriptionByIDForUpdate.t.Errorf("ProcessStorageMock.GetSubscriptionByIDForUpdate got unexpected parameter id, expected at\n%s:\nwant: %#v\n got: %#v%s\n",
+					mmGetSubscriptionByIDForUpdate.GetSubscriptionByIDForUpdateMock.defaultExpectation.expectationOrigins.originId, *mm_want_ptrs.id, mm_got.id, minimock.Diff(*mm_want_ptrs.id, mm_got.id))
+			}
+
+		} else if mm_want != nil && !minimock.Equal(*mm_want, mm_got) {
+			mmGetSubscriptionByIDForUpdate.t.Errorf("ProcessStorageMock.GetSubscriptionByIDForUpdate got unexpected parameters, expected at\n%s:\nwant: %#v\n got: %#v%s\n",
+				mmGetSubscriptionByIDForUpdate.GetSubscriptionByIDForUpdateMock.defaultExpectation.expectationOrigins.origin, *mm_want, mm_got, minimock.Diff(*mm_want, mm_got))
+		}
+
+		mm_results := mmGetSubscriptionByIDForUpdate.GetSubscriptionByIDForUpdateMock.defaultExpectation.results
+		if mm_results == nil {
+			mmGetSubscriptionByIDForUpdate.t.Fatal("No results are set for the ProcessStorageMock.GetSubscriptionByIDForUpdate")
+		}
+		return (*mm_results).sp1, (*mm_results).err
+	}
+	if mmGetSubscriptionByIDForUpdate.funcGetSubscriptionByIDForUpdate != nil {
+		return mmGetSubscriptionByIDForUpdate.funcGetSubscriptionByIDForUpdate(ctx, id)
+	}
+	mmGetSubscriptionByIDForUpdate.t.Fatalf("Unexpected call to ProcessStorageMock.GetSubscriptionByIDForUpdate. %v %v", ctx, id)
+	return
+}
+
+// GetSubscriptionByIDForUpdateAfterCounter returns a count of finished ProcessStorageMock.GetSubscriptionByIDForUpdate invocations
+func (mmGetSubscriptionByIDForUpdate *ProcessStorageMock) GetSubscriptionByIDForUpdateAfterCounter() uint64 {
+	return mm_atomic.LoadUint64(&mmGetSubscriptionByIDForUpdate.afterGetSubscriptionByIDForUpdateCounter)
+}
+
+// GetSubscriptionByIDForUpdateBeforeCounter returns a count of ProcessStorageMock.GetSubscriptionByIDForUpdate invocations
+func (mmGetSubscriptionByIDForUpdate *ProcessStorageMock) GetSubscriptionByIDForUpdateBeforeCounter() uint64 {
+	return mm_atomic.LoadUint64(&mmGetSubscriptionByIDForUpdate.beforeGetSubscriptionByIDForUpdateCounter)
+}
+
+// Calls returns a list of arguments used in each call to ProcessStorageMock.GetSubscriptionByIDForUpdate.
+// The list is in the same order as the calls were made (i.e. recent calls have a higher index)
+func (mmGetSubscriptionByIDForUpdate *mProcessStorageMockGetSubscriptionByIDForUpdate) Calls() []*ProcessStorageMockGetSubscriptionByIDForUpdateParams {
+	mmGetSubscriptionByIDForUpdate.mutex.RLock()
+
+	argCopy := make([]*ProcessStorageMockGetSubscriptionByIDForUpdateParams, len(mmGetSubscriptionByIDForUpdate.callArgs))
+	copy(argCopy, mmGetSubscriptionByIDForUpdate.callArgs)
+
+	mmGetSubscriptionByIDForUpdate.mutex.RUnlock()
+
+	return argCopy
+}
+
+// MinimockGetSubscriptionByIDForUpdateDone returns true if the count of the GetSubscriptionByIDForUpdate invocations corresponds
+// the number of defined expectations
+func (m *ProcessStorageMock) MinimockGetSubscriptionByIDForUpdateDone() bool {
+	if m.GetSubscriptionByIDForUpdateMock.optional {
+		// Optional methods provide '0 or more' call count restriction.
+		return true
+	}
+
+	for _, e := range m.GetSubscriptionByIDForUpdateMock.expectations {
+		if mm_atomic.LoadUint64(&e.Counter) < 1 {
+			return false
+		}
+	}
+
+	return m.GetSubscriptionByIDForUpdateMock.invocationsDone()
+}
+
+// MinimockGetSubscriptionByIDForUpdateInspect logs each unmet expectation
+func (m *ProcessStorageMock) MinimockGetSubscriptionByIDForUpdateInspect() {
+	for _, e := range m.GetSubscriptionByIDForUpdateMock.expectations {
+		if mm_atomic.LoadUint64(&e.Counter) < 1 {
+			m.t.Errorf("Expected call to ProcessStorageMock.GetSubscriptionByIDForUpdate at\n%s with params: %#v", e.expectationOrigins.origin, *e.params)
+		}
+	}
+
+	afterGetSubscriptionByIDForUpdateCounter := mm_atomic.LoadUint64(&m.afterGetSubscriptionByIDForUpdateCounter)
+	// if default expectation was set then invocations count should be greater than zero
+	if m.GetSubscriptionByIDForUpdateMock.defaultExpectation != nil && afterGetSubscriptionByIDForUpdateCounter < 1 {
+		if m.GetSubscriptionByIDForUpdateMock.defaultExpectation.params == nil {
+			m.t.Errorf("Expected call to ProcessStorageMock.GetSubscriptionByIDForUpdate at\n%s", m.GetSubscriptionByIDForUpdateMock.defaultExpectation.returnOrigin)
+		} else {
+			m.t.Errorf("Expected call to ProcessStorageMock.GetSubscriptionByIDForUpdate at\n%s with params: %#v", m.GetSubscriptionByIDForUpdateMock.defaultExpectation.expectationOrigins.origin, *m.GetSubscriptionByIDForUpdateMock.defaultExpectation.params)
+		}
+	}
+	// if func was set then invocations count should be greater than zero
+	if m.funcGetSubscriptionByIDForUpdate != nil && afterGetSubscriptionByIDForUpdateCounter < 1 {
+		m.t.Errorf("Expected call to ProcessStorageMock.GetSubscriptionByIDForUpdate at\n%s", m.funcGetSubscriptionByIDForUpdateOrigin)
+	}
+
+	if !m.GetSubscriptionByIDForUpdateMock.invocationsDone() && afterGetSubscriptionByIDForUpdateCounter > 0 {
+		m.t.Errorf("Expected %d calls to ProcessStorageMock.GetSubscriptionByIDForUpdate at\n%s but found %d calls",
+			mm_atomic.LoadUint64(&m.GetSubscriptionByIDForUpdateMock.expectedInvocations), m.GetSubscriptionByIDForUpdateMock.expectedInvocationsOrigin, afterGetSubscriptionByIDForUpdateCounter)
+	}
+}
+
 type mProcessStorageMockUpdateInvoice struct {
 	optional           bool
 	mock               *ProcessStorageMock
@@ -1832,9 +2569,13 @@ func (m *ProcessStorageMock) MinimockFinish() {
 		if !m.minimockDone() {
 			m.MinimockCreateSubscriptionInspect()
 
+			m.MinimockExtendSubscriptionEndAtInspect()
+
 			m.MinimockGetInvoiceByProviderOrderInspect()
 
 			m.MinimockGetPlanByIDInspect()
+
+			m.MinimockGetSubscriptionByIDForUpdateInspect()
 
 			m.MinimockUpdateInvoiceInspect()
 
@@ -1863,8 +2604,10 @@ func (m *ProcessStorageMock) minimockDone() bool {
 	done := true
 	return done &&
 		m.MinimockCreateSubscriptionDone() &&
+		m.MinimockExtendSubscriptionEndAtDone() &&
 		m.MinimockGetInvoiceByProviderOrderDone() &&
 		m.MinimockGetPlanByIDDone() &&
+		m.MinimockGetSubscriptionByIDForUpdateDone() &&
 		m.MinimockUpdateInvoiceDone() &&
 		m.MinimockWithTxDone()
 }

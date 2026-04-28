@@ -250,6 +250,12 @@ func (s *Server) handleResponse(ctx context.Context, agentID string, resp *contr
 		}
 		return seq, nil
 
+	case *controlpb.Response_Renew:
+		if err := s.dispatcher.HandleAck(ctx, agentID, seq); err != nil {
+			return seq, err
+		}
+		return seq, nil
+
 	case *controlpb.Response_StatsAll:
 		if err := s.svc.HandleStatsAll(ctx); err != nil {
 			_ = s.dispatcher.HandleNack(ctx, agentID, seq, err.Error())

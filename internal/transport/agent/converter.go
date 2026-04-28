@@ -60,6 +60,17 @@ func operationToProto(o model.Operation) (*controlpb.ControlToAgent, error) {
 				DriverType: o.Remove.DriverType,
 			},
 		}
+	case model.OpRenew:
+		if o.Renew == nil {
+			return nil, fmt.Errorf("renew payload is required for kind=%s", o.Kind)
+		}
+		task.Body = &controlpb.Task_Renew{
+			Renew: &controlpb.UserRenewRequest{
+				UserId:     o.Renew.UserID,
+				DriverType: o.Renew.DriverType,
+				ExpiresAt:  timestamppb.New(o.Renew.ExpiresAt),
+			},
+		}
 	case model.OpStatsAll:
 		task.Body = &controlpb.Task_StatsAll{
 			StatsAll: &controlpb.StatsAllRequest{},

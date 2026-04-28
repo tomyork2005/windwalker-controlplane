@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"time"
 )
 
@@ -15,9 +16,19 @@ const (
 )
 
 const (
-	msgInvoicePaid    = "Счёт оплачен. Готовим ваше подключение, ожидайте..."
-	msgDeliveryFailed = "Не удалось автоматически выдать доступ. Напишите в поддержку — мы уже разбираемся."
+	msgInvoicePaid      = "Счёт оплачен. Готовим ваше подключение, ожидайте..."
+	msgDeliveryFailed   = "Не удалось автоматически выдать доступ. Напишите в поддержку — мы уже разбираемся."
+	msgExpiringTemplate = "Подписка истекает через %s. Продлите через /start, чтобы не потерять доступ."
+	msgExpired          = "Подписка закончилась. Продлите через /start, чтобы возобновить доступ."
+	msgRenewedTemplate  = "Подписка продлена до %s. Переподключаться не нужно."
 )
+
+func formatRemaining(d time.Duration) string {
+	if d < time.Hour {
+		return "час"
+	}
+	return fmt.Sprintf("~%d ч", int(math.Round(d.Hours())))
+}
 
 type Storage interface {
 	FetchUnprocessedOutboxEvents(ctx context.Context, limit int, attemptsLimit int) ([]model.OutboxEvent, error)
@@ -29,6 +40,7 @@ type Storage interface {
 type AgentSubscribeService interface {
 	StartUserSubscribe(ctx context.Context, input model.SubscriptionActivatedEvent) error
 	StopUserSubscribe(ctx context.Context, input model.SubscriptionCancelEvent) error
+	RenewUserSubscribe(ctx context.Context, input model.SubscriptionRenewedEvent) error
 }
 
 type TelegramSender interface {
@@ -103,6 +115,20 @@ func (w *Worker) resolveEvent(ctx context.Context, event model.OutboxEvent) erro
 		}
 		return w.service.StopUserSubscribe(ctx, cancel)
 
+	case model.EventTypeSubscriptionRenewed:
+		var renewed model.SubscriptionRenewedEvent
+		if err := json.Unmarshal(event.Payload, &renewed); err != nil {
+			return err
+		}
+		return w.service.RenewUserSubscribe(ctx, renewed)
+
+	case model.EventTypeSubscriptionRenewedNotification:
+		var notify model.SubscriptionRenewedNotificationEvent
+		if err := json.Unmarshal(event.Payload, &notify); err != nil {
+			return err
+		}
+		return w.sender.Send(ctx, notify.ChatID, fmt.Sprintf(msgRenewedTemplate, notify.NewEndAt.Format("02.01.2006")))
+
 	case model.EventTypeInvoicePaidNotification:
 		var paid model.InvoicePaidNotificationEvent
 		if err := json.Unmarshal(event.Payload, &paid); err != nil {
@@ -123,6 +149,20 @@ func (w *Worker) resolveEvent(ctx context.Context, event model.OutboxEvent) erro
 			return err
 		}
 		return w.sender.Send(ctx, failed.ChatID, msgDeliveryFailed)
+
+	case model.EventTypeSubscriptionExpiringNotification:
+		var ev model.SubscriptionExpiringNotificationEvent
+		if err := json.Unmarshal(event.Payload, &ev); err != nil {
+			return err
+		}
+		return w.sender.Send(ctx, ev.ChatID, fmt.Sprintf(msgExpiringTemplate, formatRemaining(ev.RemainingDuration)))
+
+	case model.EventTypeSubscriptionExpiredNotification:
+		var ev model.SubscriptionExpiredNotificationEvent
+		if err := json.Unmarshal(event.Payload, &ev); err != nil {
+			return err
+		}
+		return w.sender.Send(ctx, ev.ChatID, msgExpired)
 
 	default:
 		return fmt.Errorf("unknown event type: %s", event.EventType)
