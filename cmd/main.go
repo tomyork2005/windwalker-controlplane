@@ -4,11 +4,8 @@ import (
 	"context"
 	controlpb "control-plane/api/control"
 	"control-plane/internal/workers"
+	"control-plane/internal/workers/cleaner"
 	"errors"
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
-	"golang.org/x/sync/errgroup"
-	"google.golang.org/grpc"
 	"log"
 	"net"
 	"net/http"
@@ -16,6 +13,11 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
 
 	"control-plane/internal/config"
 	"control-plane/internal/payment"
@@ -69,6 +71,7 @@ func main() {
 	)
 
 	worker := workers.NewWorker(storage, agentSender, bot)
+	cleaner := cleaner.NewCleaner(storage)
 
 	root := chi.NewRouter()
 	root.Use(middleware.Logger)
@@ -112,6 +115,12 @@ func main() {
 	g.Go(func() error {
 		log.Printf("worker started")
 		worker.Run(ctx)
+		return nil
+	})
+
+	g.Go(func() error {
+		log.Printf("cleaner started")
+		cleaner.Run(ctx)
 		return nil
 	})
 

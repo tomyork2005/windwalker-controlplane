@@ -28,7 +28,7 @@ crypto_cloud:
   order_ttl: 3600
   default_email: "haaaaarakiri@gmail.com"
   methods:
-    - "crypto"
+  - "crypto"
 
 platega:
   merchant_id: "cc2e4910-aca1-4f1d-9492-e724861c1501"

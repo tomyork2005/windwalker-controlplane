@@ -61,17 +61,21 @@ func (h *Handler) CallbackCryptoCloud(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) CallbackPlatega(w http.ResponseWriter, r *http.Request) {
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		slog.Error("platega callback read body", "err", err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
 	slog.Info(
 		"platega callback received",
 		"method", r.Method,
 		"path", r.URL.Path,
+		"body", string(raw),
+		"merchant_id_present", r.Header.Get("X-MerchantId") != "",
+		"secret_present", r.Header.Get("X-Secret") != "",
 	)
-
-	raw, err := io.ReadAll(r.Body)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
 
 	req := model.CallbackInput{
 		ProviderName: "Platega",

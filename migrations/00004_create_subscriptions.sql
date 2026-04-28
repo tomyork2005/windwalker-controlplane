@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id     ON subscriptions(user_id);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_invoice_id  ON subscriptions(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_plan_id     ON subscriptions(plan_id);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_active_end_at
+    ON subscriptions(end_at) WHERE status = 'active';
 CREATE UNIQUE INDEX uq_subscriptions_one_trial_per_user
     ON subscriptions(user_id) WHERE is_trial = TRUE;
 

@@ -12,7 +12,6 @@ import (
 type AgentSenderStorage interface {
 	ChooseBestAgent(ctx context.Context, driverType string, region string) (string, error)
 	BindSubscriptionToAgent(ctx context.Context, subscriptionID string, agentID string) error
-	FindAgentIDByUserID(ctx context.Context, userID string) (string, error)
 
 	WithTx(ctx context.Context, fn func(ctx context.Context) error) error
 }
@@ -75,9 +74,8 @@ func (s *AgentSender) StartUserSubscribe(ctx context.Context, input model.Subscr
 }
 
 func (s *AgentSender) StopUserSubscribe(ctx context.Context, input model.SubscriptionCancelEvent) error {
-	agentID, err := s.store.FindAgentIDByUserID(ctx, input.UserID)
-	if err != nil {
-		return fmt.Errorf("fail remove user storage: %w", err)
+	if input.AgentID == "" {
+		return fmt.Errorf("stop user subscribe: empty agent_id in event for subscription %s", input.SubscriptionID)
 	}
 
 	rm := &model.AgentRemovePayload{
@@ -85,7 +83,7 @@ func (s *AgentSender) StopUserSubscribe(ctx context.Context, input model.Subscri
 		DriverType: input.DriverType,
 	}
 
-	if err = s.dispatcher.DispatchRemove(ctx, agentID, input.SubscriptionID, rm); err != nil {
+	if err := s.dispatcher.DispatchRemove(ctx, input.AgentID, input.SubscriptionID, rm); err != nil {
 		return fmt.Errorf("dispatch remove user: %w", err)
 	}
 

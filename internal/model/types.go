@@ -109,6 +109,7 @@ type Subscription struct {
 	UserID       string
 	InvoiceID    *string
 	PlanID       string
+	AgentID      *string
 	ChatID       int64
 	Status       SubscriptionStatus
 	IsTrial      bool

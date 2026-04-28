@@ -170,22 +170,3 @@ func (s *Storage) BindSubscriptionToAgent(ctx context.Context, subscriptionID st
 
 	return nil
 }
-
-func (s *Storage) FindAgentIDByUserID(ctx context.Context, userID string) (string, error) {
-	const query = `
-		SELECT agent_id
-		FROM subscriptions
-		WHERE user_id = $1
-			AND status IN ('active', 'pending')
-			AND agent_id IS NOT NULL
-		ORDER BY start_at DESC
-		LIMIT 1
-	`
-
-	var agentID string
-	if err := pgxscan.Get(ctx, s.getExecutor(ctx), &agentID, query, userID); err != nil {
-		return "", fmt.Errorf("find agent id by user id: %w", err)
-	}
-
-	return agentID, nil
-}

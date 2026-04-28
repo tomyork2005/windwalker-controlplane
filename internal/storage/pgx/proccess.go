@@ -120,6 +120,65 @@ func (s *Storage) UpdateInvoice(ctx context.Context, invoice *model.Invoice) err
 	return nil
 }
 
+// ListExpiredActiveSubs locks up to `limit` expired active subscriptions for
+// processing in a Cleaner tick. MUST be called inside WithTx — the FOR UPDATE
+// lock is held until COMMIT, which is what gives us cross-instance dedup.
+// Joins plans to surface driver_type (subscriptions table doesn't carry it).
+func (s *Storage) ListExpiredActiveSubs(ctx context.Context, limit int) ([]*model.SubscriptionWithPlan, error) {
+	const query = `
+		SELECT
+			s.id,
+			s.user_id,
+			s.invoice_id,
+			s.plan_id,
+			s.agent_id,
+			s.chat_id,
+			s.status,
+			s.is_trial,
+			s.start_at,
+			s.end_at,
+			s.creds,
+			s.creds_ready_at,
+			p.name           AS plan_name,
+			p.region         AS plan_region,
+			p.protocol       AS plan_protocol,
+			p.duration_days  AS plan_duration_days
+		FROM subscriptions s
+		JOIN plans p ON p.id = s.plan_id
+		WHERE s.status = 'active' AND s.end_at < now()
+		ORDER BY s.end_at
+		LIMIT $1
+		FOR UPDATE OF s SKIP LOCKED
+	`
+
+	var rows []*subscriptionWithPlanRow
+	if err := pgxscan.Select(ctx, s.getExecutor(ctx), &rows, query, limit); err != nil {
+		return nil, fmt.Errorf("list expired active subs: %w", err)
+	}
+
+	out := make([]*model.SubscriptionWithPlan, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.toModel())
+	}
+
+	return out, nil
+}
+
+func (s *Storage) MarkSubscriptionInactive(ctx context.Context, id string) error {
+	const query = `UPDATE subscriptions SET status = 'inactive' WHERE id = $1`
+
+	tag, err := s.getExecutor(ctx).Exec(ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("mark subscription inactive: %w", err)
+	}
+
+	if tag.RowsAffected() == 0 {
+		return storage.ErrNotFound
+	}
+
+	return nil
+}
+
 func (s *Storage) CreateSubscription(ctx context.Context, sub *model.Subscription) error {
 	const query = `
 		INSERT INTO subscriptions (

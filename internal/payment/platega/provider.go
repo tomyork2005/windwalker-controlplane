@@ -147,9 +147,18 @@ func (p *Provider) VerifyCallback(input model.CallbackInput) (model.CallbackOutp
 		return out, fmt.Errorf("platega: callback has empty id")
 	}
 
+	mapped := mapStatus(pl.Status)
+	slog.Info("platega callback decoded",
+		"transaction_id", pl.ID,
+		"provider_status", pl.Status,
+		"mapped_status", mapped,
+		"amount", pl.Amount,
+		"currency", pl.Currency,
+	)
+
 	out = model.CallbackOutput{
 		ProviderName:   providerName,
-		Status:         mapStatus(pl.Status),
+		Status:         mapped,
 		PaymentOrderID: pl.ID,
 		PaidAt:         time.Now().UTC(),
 	}

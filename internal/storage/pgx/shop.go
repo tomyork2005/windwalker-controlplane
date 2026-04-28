@@ -185,6 +185,7 @@ func (s *Storage) GetActiveSubscriptionByUser(ctx context.Context, userID string
 			s.user_id,
 			s.invoice_id,
 			s.plan_id,
+			s.agent_id,
 			s.chat_id,
 			s.status,
 			s.is_trial,
@@ -333,6 +334,7 @@ type subscriptionWithPlanRow struct {
 	UserID       string     `db:"user_id"`
 	InvoiceID    *string    `db:"invoice_id"`
 	PlanID       string     `db:"plan_id"`
+	AgentID      *string    `db:"agent_id"`
 	ChatID       int64      `db:"chat_id"`
 	Status       string     `db:"status"`
 	IsTrial      bool       `db:"is_trial"`
@@ -353,6 +355,7 @@ func (r *subscriptionWithPlanRow) toModel() *model.SubscriptionWithPlan {
 			UserID:       r.UserID,
 			InvoiceID:    r.InvoiceID,
 			PlanID:       r.PlanID,
+			AgentID:      r.AgentID,
 			ChatID:       r.ChatID,
 			Status:       model.SubscriptionStatus(r.Status),
 			IsTrial:      r.IsTrial,

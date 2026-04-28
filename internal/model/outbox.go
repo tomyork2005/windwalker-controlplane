@@ -21,6 +21,7 @@ type SubscriptionActivatedEvent struct {
 
 type SubscriptionCancelEvent struct {
 	UserID     string `json:"user_id"`
+	AgentID    string `json:"agent_id"`
 	DriverType string `json:"driver_type"`
 
 	SubscriptionID string `json:"subscription_id"`
