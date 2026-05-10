@@ -64,12 +64,15 @@ func (b *Bot) renderMySubscription(ctx context.Context, c tele.Context) error {
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			text := fmt.Sprintf("Привет, %s! 👋\n\nУ тебя пока нет активной подписки.", html.EscapeString(greeting))
-			kb := iconKeyboard(
-				[]map[string]any{iconCallbackBtn("Попробовать бесплатно", string(actTrialActivate), "", iconTrial)},
+			rows := make([][]map[string]any, 0, 3)
+			if used, _ := b.svc.HasUsedTrial(ctx, user.ID); !used {
+				rows = append(rows, []map[string]any{iconCallbackBtn("Попробовать бесплатно", string(actTrialActivate), "", iconTrial)})
+			}
+			rows = append(rows,
 				[]map[string]any{iconCallbackBtn("Купить подписку", string(actMenuBuy), "", iconBuy)},
 				[]map[string]any{iconCallbackBtn("В меню", string(actBackToMain), "", iconHome)},
 			)
-			return b.sendOrEditIconKeyboard(c, text, nil, kb)
+			return b.sendOrEditIconKeyboard(c, text, nil, iconKeyboard(rows...))
 		}
 		return c.Respond(&tele.CallbackResponse{Text: "Не удалось загрузить подписку", ShowAlert: true})
 	}

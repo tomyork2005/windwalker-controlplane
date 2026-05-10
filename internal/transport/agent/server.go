@@ -16,37 +16,32 @@ import (
 
 type Service interface {
 	RegisterAgent(ctx context.Context, agent *model.Agent) error
-	Heartbeat(ctx context.Context, agentID string, uptimeSeconds uint32) error
-
+	HandleStats(ctx context.Context, stats model.AgentStats) error
 	HandleStartUserSubscribeResponse(ctx context.Context, subscribeID string, creds service.VPNCreds) error
-	HandleRemoveCallback(ctx context.Context) error
-	HandleStatsAll(ctx context.Context) error
-	HandleError(ctx context.Context) error
 }
 
 type Dispatcher interface {
-	RecoverPending(ctx context.Context, agentID string, fromExclusive uint64, limit int) error
-	HandleAck(ctx context.Context, agentID string, seq uint64) error
-	HandleNack(ctx context.Context, agentID string, seq uint64, errMsg string) error
-	GetRequestIDByAgentSeq(ctx context.Context, agentID string, seq uint64) (string, error)
+	RecoverPending(ctx context.Context, agentID string, fromExclusiveID int64, limit int) error
+	HandleAck(ctx context.Context, agentID string, requestID string) error
+	HandleNack(ctx context.Context, agentID string, requestID string, errMsg string) error
 }
 
 type Server struct {
 	svc             Service
 	dispatcher      Dispatcher
 	hub             *Hub
-	hbTTL           time.Duration
+	statsTTL        time.Duration
 	outboxScanLimit int
 
 	controlpb.UnimplementedControlPlaneServer
 }
 
-func NewServer(svc Service, dispatcher Dispatcher, hub *Hub, hbTTL time.Duration) *Server {
+func NewServer(svc Service, dispatcher Dispatcher, hub *Hub, statsTTL time.Duration) *Server {
 	return &Server{
 		svc:             svc,
 		hub:             hub,
 		dispatcher:      dispatcher,
-		hbTTL:           hbTTL,
+		statsTTL:        statsTTL,
 		outboxScanLimit: 256,
 	}
 }
@@ -70,8 +65,7 @@ func (s *Server) Workstream(stream controlpb.ControlPlane_WorkstreamServer) erro
 	}
 
 	agent := agentFromHelloPb(hello)
-	err = s.svc.RegisterAgent(ctx, agent)
-	if err != nil {
+	if err = s.svc.RegisterAgent(ctx, agent); err != nil {
 		return status.Errorf(codes.Internal, "register agent: %v", err)
 	}
 
@@ -81,13 +75,12 @@ func (s *Server) Workstream(stream controlpb.ControlPlane_WorkstreamServer) erro
 		close(old.sendCh)
 	}
 
-	err = s.hub.TrySend(model.Operation{AgentID: agent.ID, Kind: model.OpHello})
-	if err != nil {
+	if err = s.hub.TrySend(model.Operation{AgentID: agent.ID, Kind: model.OpHello}); err != nil {
 		s.cleanupSession(agentSession)
 		return status.Error(codes.Unavailable, "send buffer full")
 	}
 
-	// 2. Starting workers and send task what`s should be delivered, but agent was offline
+	// 2. Recover pending tasks from previous offline window
 	agentSession.recovering.Store(true)
 	go s.flushPending(agentSession.ctx, agentSession)
 
@@ -107,21 +100,24 @@ func (s *Server) Workstream(stream controlpb.ControlPlane_WorkstreamServer) erro
 		}
 	}()
 
-	hbTimer := time.NewTimer(s.hbTTL)
-	defer hbTimer.Stop()
+	statsTimer := time.NewTimer(s.statsTTL)
+	defer statsTimer.Stop()
 
 	for {
 		select {
 		case in := <-inCh:
-			resetTimer(hbTimer, s.hbTTL)
+			resetTimer(statsTimer, s.statsTTL)
 
 			switch x := in.Msg.(type) {
-			case *controlpb.AgentToControl_Hb:
-				_ = s.svc.Heartbeat(ctx, agent.ID, x.Hb.GetUptimeSeconds())
+			case *controlpb.AgentToControl_Stats:
+				if err := s.svc.HandleStats(ctx, StatsFromProto(x.Stats)); err != nil {
+					slog.Error("handle stats failed", "agent_id", agent.ID, "err", err)
+				}
 
 			case *controlpb.AgentToControl_Resp:
-				seq, _ := s.handleResponse(ctx, agent.ID, x.Resp)
-				agentSession.lastSeq.Store(seq)
+				if err := s.handleResponse(ctx, agent.ID, x.Resp); err != nil {
+					slog.Error("handle response failed", "agent_id", agent.ID, "err", err)
+				}
 			}
 
 		case recvErr := <-recvErrCh:
@@ -130,10 +126,9 @@ func (s *Server) Workstream(stream controlpb.ControlPlane_WorkstreamServer) erro
 		case sendErr := <-sendErrCh:
 			return s.finishStream(agentSession, nil, sendErr)
 
-		case <-hbTimer.C:
-			return s.finishStream(agentSession, sendErrCh, status.Error(codes.DeadlineExceeded, "heartbeat timeout"))
+		case <-statsTimer.C:
+			return s.finishStream(agentSession, sendErrCh, status.Error(codes.DeadlineExceeded, "stats timeout"))
 		}
-
 	}
 }
 
@@ -206,80 +201,44 @@ func (s *Server) cleanupSession(ss *session) {
 func (s *Server) flushPending(ctx context.Context, ss *session) {
 	defer ss.recovering.Store(false)
 
-	from := ss.lastSeq.Load()
-	if err := s.dispatcher.RecoverPending(ctx, ss.agentID, from, s.outboxScanLimit); err != nil {
+	if err := s.dispatcher.RecoverPending(ctx, ss.agentID, 0, s.outboxScanLimit); err != nil {
+		slog.Error("recover pending failed", "agent_id", ss.agentID, "err", err)
 		return
 	}
 }
 
-func (s *Server) handleResponse(ctx context.Context, agentID string, resp *controlpb.Response) (uint64, error) {
+func (s *Server) handleResponse(ctx context.Context, agentID string, resp *controlpb.Response) error {
 	if resp == nil {
-		return 0, status.Error(codes.InvalidArgument, "nil response")
+		return status.Error(codes.InvalidArgument, "nil response")
 	}
 
-	meta := resp.GetMeta()
-	if meta == nil {
-		return 0, status.Error(codes.InvalidArgument, "response meta is required")
-	}
-
-	seq := meta.GetSeq()
-	reqID := meta.GetRequestId()
-
-	slog.Info("agent response", "agent_id", agentID, "seq", seq, "req_id", reqID)
-
+	reqID := resp.GetRequestId()
 	if reqID == "" {
-		if recovered, err := s.dispatcher.GetRequestIDByAgentSeq(ctx, agentID, seq); err == nil && recovered != "" {
-			slog.Warn("agent echoed empty request_id, recovered from agent_tasks",
-				"agent_id", agentID, "seq", seq, "recovered_req_id", recovered)
-			reqID = recovered
-		} else {
-			slog.Error("agent echoed empty request_id and recovery failed",
-				"agent_id", agentID, "seq", seq, "err", err)
-		}
+		slog.Error("agent echoed empty request_id — cannot route response", "agent_id", agentID)
+		return nil
 	}
 
 	switch b := resp.Body.(type) {
 	case *controlpb.Response_Upsert:
 		if err := s.svc.HandleStartUserSubscribeResponse(ctx, reqID, VPNCredsFromProto(b)); err != nil {
 			slog.Error("upsert response handling failed — task left pending for recovery",
-				"agent_id", agentID, "seq", seq, "err", err)
-			return seq, err
+				"agent_id", agentID, "request_id", reqID, "err", err)
+			return err
 		}
-		if err := s.dispatcher.HandleAck(ctx, agentID, seq); err != nil {
-			return seq, err
-		}
-		return seq, nil
+		return s.dispatcher.HandleAck(ctx, agentID, reqID)
 
-	case *controlpb.Response_Renew:
-		if err := s.dispatcher.HandleAck(ctx, agentID, seq); err != nil {
-			return seq, err
-		}
-		return seq, nil
-
-	case *controlpb.Response_StatsAll:
-		if err := s.svc.HandleStatsAll(ctx); err != nil {
-			_ = s.dispatcher.HandleNack(ctx, agentID, seq, err.Error())
-			return seq, err
-		}
-		if err := s.dispatcher.HandleAck(ctx, agentID, seq); err != nil {
-			return seq, err
-		}
-		return seq, nil
+	case *controlpb.Response_Remove:
+		return s.dispatcher.HandleAck(ctx, agentID, reqID)
 
 	case *controlpb.Response_Error:
-		errMsg := "agent returned error"
-		if b.Error != nil && b.Error.GetError() != "" {
-			errMsg = b.Error.GetError()
+		errMsg := b.Error
+		if errMsg == "" {
+			errMsg = "agent returned error"
 		}
-		if err := s.dispatcher.HandleNack(ctx, agentID, seq, errMsg); err != nil {
-			return seq, err
-		}
-		if err := s.svc.HandleError(ctx); err != nil {
-			return seq, err
-		}
-		return seq, nil
+		return s.dispatcher.HandleNack(ctx, agentID, reqID, errMsg)
 
 	default:
-		return seq, nil
+		slog.Warn("unknown response body type", "agent_id", agentID, "request_id", reqID)
+		return nil
 	}
 }

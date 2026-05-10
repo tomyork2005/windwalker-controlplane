@@ -133,7 +133,6 @@ type Agent struct {
 	ID          string
 	InstanceID  string
 	Region      string
-	Version     string
 	DriverTypes []string
 }
 

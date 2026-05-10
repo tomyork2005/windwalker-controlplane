@@ -5,8 +5,9 @@ import (
 	"control-plane/internal/model"
 	"errors"
 	"fmt"
-	"github.com/georgysavva/scany/v2/pgxscan"
 	"time"
+
+	"github.com/georgysavva/scany/v2/pgxscan"
 )
 
 // Receiver
@@ -21,14 +22,12 @@ func (s *Storage) UpsertAgent(ctx context.Context, agent *model.Agent) error {
 			id,
 			instance_id,
 			region,
-			version,
 			driver_types
 		)
-		VALUES ($1, $2, $3, $4, $5)
+		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (id) DO UPDATE SET
 			instance_id = EXCLUDED.instance_id,
 			region = EXCLUDED.region,
-			version = EXCLUDED.version,
 			driver_types = EXCLUDED.driver_types
 	`
 
@@ -38,7 +37,6 @@ func (s *Storage) UpsertAgent(ctx context.Context, agent *model.Agent) error {
 		agent.ID,
 		agent.InstanceID,
 		agent.Region,
-		agent.Version,
 		agent.DriverTypes,
 	)
 	if err != nil {
@@ -48,7 +46,7 @@ func (s *Storage) UpsertAgent(ctx context.Context, agent *model.Agent) error {
 	return nil
 }
 
-func (s *Storage) UpdateAgentHeartbeat(
+func (s *Storage) UpdateAgentStats(
 	ctx context.Context,
 	agentID string,
 	uptime uint64,
@@ -60,17 +58,17 @@ func (s *Storage) UpdateAgentHeartbeat(
 		SET
 			uptime_seconds = $2,
 			last_seen_at = $3,
-			hb_deadline_at = $4
+			stats_deadline_at = $4
 		WHERE id = $1
 	`
 
 	tag, err := s.getExecutor(ctx).Exec(ctx, query, agentID, int64(uptime), seenAt, deadline)
 	if err != nil {
-		return fmt.Errorf("update agent heartbeat: %w", err)
+		return fmt.Errorf("update agent stats: %w", err)
 	}
 
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("update agent heartbeat: agent not found")
+		return fmt.Errorf("update agent stats: agent not found")
 	}
 
 	return nil
@@ -109,23 +107,6 @@ func (s *Storage) StoreSubscriptionCreds(ctx context.Context, subscriptionID str
 	return nil
 }
 
-// GetRequestIDByAgentSeq is a fallback used when an agent echoes an empty meta.request_id.
-// We can still recover the original subscription_id via the (agent_id, seq) pair.
-func (s *Storage) GetRequestIDByAgentSeq(ctx context.Context, agentID string, seq uint64) (string, error) {
-	const query = `
-		SELECT request_id
-		FROM agent_tasks
-		WHERE agent_id = $1 AND seq = $2
-		LIMIT 1
-	`
-
-	var reqID string
-	if err := pgxscan.Get(ctx, s.getExecutor(ctx), &reqID, query, agentID, seq); err != nil {
-		return "", fmt.Errorf("get request id by agent seq: %w", err)
-	}
-	return reqID, nil
-}
-
 // Sender
 
 func (s *Storage) ChooseBestAgent(ctx context.Context, driverType string, region string) (string, error) {
@@ -137,8 +118,8 @@ func (s *Storage) ChooseBestAgent(ctx context.Context, driverType string, region
 			AND sub.status IN ('active', 'pending')
 		WHERE a.region = $1
 			AND $2 = ANY(a.driver_types)
-			AND a.hb_deadline_at IS NOT NULL
-			AND a.hb_deadline_at > now()
+			AND a.stats_deadline_at IS NOT NULL
+			AND a.stats_deadline_at > now()
 		GROUP BY a.id, a.last_seen_at
 		ORDER BY COUNT(sub.id) ASC, a.last_seen_at DESC NULLS LAST, a.id ASC
 		LIMIT 1

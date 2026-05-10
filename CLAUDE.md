@@ -70,12 +70,13 @@ cp .env.example .env                 # отредактировать ACME_EMAIL
 Агент VPN-ноды живёт в отдельной репе: **`C:\Users\Handi\GolandProjects\windwalker-agent`** (Go module `agent`, у него тоже есть `CLAUDE.md`). Это клиент к нашему gRPC `vpn.control.v1.ControlPlane.Workstream`.
 
 Сводка контракта (детали — в CLAUDE.md агента):
-- Агент держит **один** долгоживущий bidi-стрим. Первый фрейм — `AgentHello`, в ответ — `Welcome{agent_id}`. После этого CP может слать `Task` (`Upsert` / `Remove` / `StatsAll` / `StatsUser`).
-- Каждый `Task` несёт `TaskMeta{seq, request_id}`. Агент **обязан** ответить `Ack{seq}` или `Nack{seq, err}`. `seq` — монотонный per-agent (наша таблица `agent_seq`).
-- Агент идемпотентен по `last_applied_seq` (хранит локально в sqlite через `PRAGMA user_version`-схему, см. его `internal/storage`). Повторный приход того же `seq` → no-op + Ack. Поэтому при реконнекте мы безопасно пере-шлём pending-таски через `RecoverPending`.
-- Identity юзера в Xray — `user.ID` как UUID, и он же используется как Xray `email`-поле. `driver_xray.protocol` — только `vless` или `vmess`. Это **обязательство CP** при формировании `UserUpsertRequest`.
-- `request_id` в нашем флоу = `subscription_id`. Агент не интерпретирует — пробрасывает обратно в `Response.Meta` (если потерял — CP восстановит через `GetRequestIDByAgentSeq(agent_id, seq)`).
-- Heartbeats: агент шлёт каждые `heartbeat_period` сек; CP закрывает стрим с `DeadlineExceeded` если пропуск.
+- Агент держит **один** долгоживущий bidi-стрим. Первый фрейм — `AgentHello`, в ответ — `Welcome{agent_id}`. После этого CP может слать `Task` (`Upsert` / `Remove`).
+- Каждый `Task` несёт **только** `request_id` (бизнесовый ключ идемпотентности). Никаких `seq`/`TaskMeta` нет — упрощено в новом контракте. Агент идемпотентен на стороне `tasks.request_id` (PK у него в sqlite); повторная отправка того же `request_id` при реконнекте — no-op + ack.
+- `Response` несёт обратно тот же `request_id` и тело: `Upsert{creds}` / `Remove{}` / `error string`. Если агент возвращает пустой `request_id` — CP логирует и роутить ответ не может; восстановления нет (в старом контракте было через seq, но seq больше нет).
+- Identity юзера в Xray — `user.user_id` как UUID; драйвер ожидает `user_id + "@xray.com"` как email-поле. Поддерживаемый протокол — только VLESS+Vision+REALITY.
+- `request_id` в нашем флоу = `subscription_id`. Агент не интерпретирует — echo'ит обратно.
+- Liveness — через периодические `Stats` (top-level `AgentToControl.stats`) с `agent_id`, `uptime_seconds`, `window_end`, `users[]` (дельты per-юзер за окно). Дефолтный интервал у агента — 30с. CP апдейтит `agents.stats_deadline_at = now() + statsTTL` (default 90с) и пишет дельты append-only в `user_traffic`. Пропуск Stats → стрим закрывается с `DeadlineExceeded`.
+- **Renew — CP-only.** Агент про expires_at вообще не знает. Продление = только `subscriptions.end_at` обновляется + TG-уведомление. Снятие просроченной подписки делает `cleaner` (эмиттит `subscription_cancelled` → `StopUserSubscribe` → remove-таск).
 
 Когда трогаешь `api/control/control.proto` — **обязательно** регенерируй на обеих сторонах. У агента: `protoc --go_out=. --go-grpc_out=. api/control/control.proto`. Несовпадение proto = сломанный стрим.
 
@@ -89,26 +90,28 @@ cp .env.example .env                 # отредактировать ACME_EMAIL
 2. **Webhook провайдера** (HTTP, `internal/transport/handler`) принимает колбэк платежа → `ProcessService.ProcessPaymentCallback`:
    - `VerifyCallback` на фасаде `Payments` (CryptoCloud — JWT в теле; Platega — `X-MerchantId` + `X-Secret` в заголовках, `subtle.ConstantTimeCompare`). На bad-signature handler Platega отвечает `401` (без ретраев), на transient-ошибки — `500` (Platega ретрайнет до 3 раз с интервалом 5 минут).
    - Внутри `WithTx`: `GetInvoiceByProviderOrder(provider, provider_order_id)` (`SELECT … FOR UPDATE`), идемпотентный short-circuit если уже `success`. Если callback пришёл с `CANCELED/CHARGEBACKED/UNKNOWN` — пишем статус и выходим (подписку не активируем). На `success` — ставим статус, сохраняем `invoice_paid_notification` в outbox, создаём `Subscription`, пишем `subscription_activated` в outbox (**транзакционный outbox**).
-3. **Outbox worker** (`internal/workers`) опрашивает `outbox_events` раз в 3 секунды батчами по 5 (лимит попыток — 10). Обрабатывает пять типов событий:
+3. **Outbox worker** (`internal/workers`) опрашивает `outbox_events` раз в 3 секунды батчами по 5 (лимит попыток — 10). Обрабатывает события:
    - `subscription_activated` → `AgentSender.StartUserSubscribe` (выбор агента + dispatch upsert)
    - `subscription_cancelled` → `AgentSender.StopUserSubscribe`
    - `invoice_paid_notification` → отправка TG-сообщения юзеру через `TelegramSender`
    - `creds_delivery` → отправка готового `vless://…` (payload события уже содержит `chat_id` и `message` — второй DB-лукап не нужен)
    - `delivery_failed_notification` → «не получилось, напиши в поддержку», рождается воркером при исчерпании ретраев у `creds_delivery`
-4. **AgentSender.StartUserSubscribe** — внутри tx: `ChooseBestAgent` (регион + driver_type, least-loaded), `BindSubscriptionToAgent`, `Dispatcher.DispatchUpsert`. После коммита — `TryDispatchPrepared` пушит таску сразу.
-5. **Dispatcher** (`internal/service/dispatcher.go`) — durable pipe команд. `EnqueueTask` пишет в `agent_tasks` с монотонным `seq` из `NextSeq` (бэкенд — таблица `agent_seq`, миграция `00006`). `TrySend` — non-blocking через `sendCh` сессии; фейл инкрементит retries, но строка остаётся pending.
+   - `subscription_renewed_notification` → TG-сообщение «подписка продлена до …». Никакого агентского side-effect'а: продление = чисто `subscriptions.end_at` обновляется в `processRenewal`, агент про expiry не знает.
+   - `subscription_expiring_notification` / `subscription_expired_notification` — рождает `cleaner` (TG-варнинги о скором конце, и финальный «закончилась»).
+4. **AgentSender.StartUserSubscribe** — внутри tx: `ChooseBestAgent` (регион + driver_type, least-loaded **среди живых: `stats_deadline_at > now()`**), `BindSubscriptionToAgent`, `Dispatcher.DispatchUpsert`. После коммита — `TryDispatchPrepared` пушит таску сразу.
+5. **Dispatcher** (`internal/service/dispatcher.go`) — durable pipe команд. `EnqueueTask` пишет в `agent_tasks` с `ON CONFLICT (agent_id, request_id, kind) DO NOTHING` (идемпотентность). Идентификатор строки — `id BIGSERIAL`, порядок отправки = `id ASC`. `TrySend` — non-blocking через `sendCh` сессии; фейл инкрементит retries, но строка остаётся pending.
 6. **Agent gRPC Workstream** (`internal/transport/agent/server.go`):
-   - Агент открывает bidi-стрим, первый фрейм **обязан** быть `AgentHello` → `RegisterAgent` → создаёт `session` в `Hub` (вытесняя stale-сессию с тем же `agent_id`).
-   - Сервер отвечает `Welcome`, затем `flushPending` запускает `RecoverPending`: забирает неотаканные `agent_tasks` с `lastSeq`, шлёт по порядку, маркирует `sent_at`.
-   - Ответы клиента обновляют `agent_tasks` через `HandleAck` / `HandleNack`. Heartbeats сбрасывают per-stream `hbTimer`; пропуск heartbeat → стрим закрывается с `DeadlineExceeded`.
+   - Агент открывает bidi-стрим, первый фрейм **обязан** быть `AgentHello` → `RegisterAgent` (`UpsertAgent` без выставления `stats_deadline_at` — агент пока не живой) → создаёт `session` в `Hub` (вытесняя stale-сессию с тем же `agent_id`).
+   - Сервер отвечает `Welcome`, затем `flushPending` запускает `RecoverPending`: забирает неотаканные `agent_tasks` (по `id ASC`, `done_at IS NULL`, `retries < limit`), шлёт по порядку, маркирует `sent_at`.
+   - Ответы клиента обновляют `agent_tasks` через `HandleAck` / `HandleNack` (ключуются по `(agent_id, request_id)`, обновляется самая старая pending-строка).
+   - Входящие `Stats` сбрасывают per-stream `statsTimer` и вызывают `HandleStats` → `UpdateAgentStats` (uptime + `stats_deadline_at = now()+statsTTL`) + батч-инсерт в `user_traffic`. Пропуск Stats → стрим закрывается с `DeadlineExceeded`.
    - На `HandleStartUserSubscribeResponse` (upsert с кредами): CP **сохраняет креды в `subscriptions.creds`**, пишет `creds_delivery` в outbox, **всегда Ack'ает** таску агента. Доставка пользователю — асинхронно через воркер (не блокирует агента).
-   - Если `meta.request_id` в ответе пустой — fallback через `GetRequestIDByAgentSeq(agent_id, seq)` поднимает реальный `subscription_id` из `agent_tasks`.
+   - Если `request_id` в ответе пустой — лог + drop ответа. Восстановления нет: ack-сценарий привязан к request_id напрямую (никакой seq-fallback в новом контракте).
 
 ### Контракт идемпотентности и порядка
 
-- `request_id` (= `subscription_id` для subscribe-флоу) = **бизнесовый** ключ идемпотентности. Агент может его не понимать, но обязан echo'ить обратно.
-- `(agent_id, seq)` однозначно идентифицирует транспортную операцию; агент обязан обрабатывать строго по порядку и ack'ать по `seq`. Дедуп на стороне агента — через `last_applied_seq` (см. `windwalker-agent/internal/storage`).
-- Один и тот же `(agent_id, seq)` может быть переотправлен после реконнекта агента — агент должен быть идемпотентен по `(request_id, seq)`.
+- `request_id` (= `subscription_id` для subscribe-флоу) = **единственный** ключ идемпотентности. Агент обязан echo'ить его в `Response`. Один и тот же `request_id` повторно отосланный CP при реконнекте — агент дедупит сам (PK на `tasks.request_id`).
+- На стороне CP: `agent_tasks(agent_id, request_id, kind)` — UNIQUE; повторный `EnqueueTask` с теми же ключами = no-op. Это значит, что для `(subscription_id, OpUpsert)` и `(subscription_id, OpRemove)` могут одновременно лежать две строки — это норма (выдали → отозвали). Recovery дренит весь pending по `id ASC`.
 - Webhook инвойса идемпотентен через short-circuit `inv.Status == SuccessInvoiceStatus`. Лукап инвойса по callback'у — единый для всех провайдеров: `(payment_provider, provider_order_id)`. Это требует индекс `idx_invoices_provider_order` (UNIQUE partial). `provider_order_id` = идентификатор транзакции на стороне провайдера (`uuid` у CryptoCloud, `transactionId` у Platega). `CreateOrderOutput.ProviderOrderID` ставится при создании ордера и сохраняется в `invoices.provider_order_id`.
 - **Доставка кредов отвязана от работы агента**: CP-side ошибка при обработке ответа (DB-недоступна, TG упал и т.п.) **не** ведёт к Nack'у таски. Таска остаётся `done_at IS NULL` и подхватится `RecoverPending` при реконнекте. Доставка пользователю ретраится внутри outbox-воркера.
 
@@ -140,7 +143,7 @@ cp .env.example .env                 # отредактировать ACME_EMAIL
 ## Известные шероховатости и ограничения
 
 - `Agent.Validate()` — no-op-заглушка.
-- `HandleRemoveCallback` / `HandleStatsAll` / `HandleError` возвращают `"not implemented yet"`.
+- **Cold-start activation race.** После `RegisterAgent` CP оставляет `agents.stats_deadline_at = NULL` — то есть до первого Stats агент **не выбирается** `ChooseBestAgent`. Первый Stats у агента приходит через `~StatsInterval` (default 30с). Если активация подписки попадёт в это окно, outbox-воркер ретраит 10 × 3с = 30с — впритык. Если станет проблемой: либо поднять `maxProcessAttempts` в `internal/workers/worker.go`, либо попросить агента слать первый Stats сразу после Welcome (отдельный тикет в `windwalker-agent`).
 - В дефолтном конфиге `http.port` и `telegram.port` оба равны `:8081` — поле `telegram.port` в рантайме не используется (webhook примонтирован на chi-роутере по `/tg/webhook`).
 - `internal/storage/pgx/proccess.go::GetInvoiceForUpdate` после унификации callback-флоу не вызывается ни откуда — orphan, оставлен как утилита; удалить, если не понадобится в течение пары итераций.
 - **Chargeback после success — silent skip.** `ProcessPaymentCallback` идемпотентен на условии `inv.Status == SuccessInvoiceStatus`, поэтому `CHARGEBACKED` от Platega после уже-confirmed транзакции **не** инициирует отзыв подписки. Когда понадобится корректная обработка возвратов: добавить выпуск `subscription_cancelled` outbox-события + перевод инвойса в новый статус. Не делать без явного запроса — задевает business-flow.

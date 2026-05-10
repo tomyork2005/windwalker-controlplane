@@ -147,17 +147,6 @@ func (s *ProcessService) processRenewal(ctx context.Context, inv *model.Invoice)
 		return err
 	}
 
-	renewed := model.SubscriptionRenewedEvent{
-		SubscriptionID: sub.ID,
-		AgentID:        *sub.AgentID,
-		UserID:         sub.UserID,
-		DriverType:     sub.DriverType,
-		NewEndAt:       newEnd,
-	}
-	if err := s.outbox.SaveOutboxEvent(ctx, model.EventTypeSubscriptionRenewed, renewed); err != nil {
-		return err
-	}
-
 	notify := model.SubscriptionRenewedNotificationEvent{
 		ChatID:   sub.ChatID,
 		NewEndAt: newEnd,

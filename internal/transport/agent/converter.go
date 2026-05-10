@@ -5,8 +5,6 @@ import (
 	"control-plane/internal/model"
 	"control-plane/internal/service"
 	"fmt"
-
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func agentFromHelloPb(hello *controlpb.AgentHello) *model.Agent {
@@ -18,22 +16,25 @@ func agentFromHelloPb(hello *controlpb.AgentHello) *model.Agent {
 		ID:          id,
 		InstanceID:  hello.GetInstanceId(),
 		Region:      hello.GetRegion(),
-		Version:     hello.GetVersion(),
 		DriverTypes: hello.GetDriverTypes(),
 	}
 }
+
 func operationToProto(o model.Operation) (*controlpb.ControlToAgent, error) {
 	if err := o.Validate(); err != nil {
 		return nil, fmt.Errorf("operation validate: %w", err)
 	}
 
-	meta := &controlpb.TaskMeta{
-		RequestId: o.RequestID,
-		Seq:       o.Seq,
+	if o.Kind == model.OpHello {
+		return &controlpb.ControlToAgent{
+			Message: &controlpb.ControlToAgent_Welcome{
+				Welcome: &controlpb.Welcome{AgentId: o.AgentID, Message: "hello"},
+			},
+		}, nil
 	}
 
 	task := &controlpb.Task{
-		Meta: meta,
+		RequestId: o.RequestID,
 	}
 
 	switch o.Kind {
@@ -44,9 +45,8 @@ func operationToProto(o model.Operation) (*controlpb.ControlToAgent, error) {
 		task.Body = &controlpb.Task_Upsert{
 			Upsert: &controlpb.UserUpsertRequest{
 				User: &controlpb.User{
-					Id:         o.Upsert.UserID,
+					UserId:     o.Upsert.UserID,
 					DriverType: o.Upsert.DriverType,
-					ExpiresAt:  timestamppb.New(o.Upsert.ExpiresAt),
 				},
 			},
 		}
@@ -56,45 +56,18 @@ func operationToProto(o model.Operation) (*controlpb.ControlToAgent, error) {
 		}
 		task.Body = &controlpb.Task_Remove{
 			Remove: &controlpb.UserRemoveRequest{
-				UserId:     o.Remove.UserID,
-				DriverType: o.Remove.DriverType,
+				User: &controlpb.User{
+					UserId:     o.Remove.UserID,
+					DriverType: o.Remove.DriverType,
+				},
 			},
 		}
-	case model.OpRenew:
-		if o.Renew == nil {
-			return nil, fmt.Errorf("renew payload is required for kind=%s", o.Kind)
-		}
-		task.Body = &controlpb.Task_Renew{
-			Renew: &controlpb.UserRenewRequest{
-				UserId:     o.Renew.UserID,
-				DriverType: o.Renew.DriverType,
-				ExpiresAt:  timestamppb.New(o.Renew.ExpiresAt),
-			},
-		}
-	case model.OpStatsAll:
-		task.Body = &controlpb.Task_StatsAll{
-			StatsAll: &controlpb.StatsAllRequest{},
-		}
-	case model.OpStatsUser:
-		if o.StatsUser == nil {
-			return nil, fmt.Errorf("stats_user payload is required for kind=%s", o.Kind)
-		}
-		task.Body = &controlpb.Task_StatsUser{
-			StatsUser: &controlpb.StatsUserRequest{
-				UserId: o.StatsUser.UserID,
-			},
-		}
-	case model.OpHello:
-		return &controlpb.ControlToAgent{
-			Msg: &controlpb.ControlToAgent_Welcome{
-				Welcome: &controlpb.Welcome{AgentId: o.AgentID, Message: "hello"},
-			}}, nil
 	default:
 		return nil, fmt.Errorf("unsupported operation kind: %s", o.Kind)
 	}
 
 	return &controlpb.ControlToAgent{
-		Msg: &controlpb.ControlToAgent_Task{
+		Message: &controlpb.ControlToAgent_Task{
 			Task: task,
 		},
 	}, nil
@@ -112,19 +85,32 @@ func VPNCredsFromProto(upsert *controlpb.Response_Upsert) service.VPNCreds {
 
 	if v := creds.GetVless(); v != nil {
 		return &model.VlessCreds{
-			UserID:   creds.GetUserId(),
-			UUID:     v.GetUuid(),
-			Host:     v.GetHost(),
-			Port:     v.GetPort(),
-			Security: v.GetSecurity(),
-			Sni:      v.GetSni(),
-			Alpn:     v.GetAlpn(),
-			Path:     v.GetPath(),
-			Network:  v.GetNetwork(),
-			Flow:     v.GetFlow(),
-			URI:      v.GetUri(),
+			UserID: creds.GetUserId(),
+			URI:    v.GetUri(),
 		}
 	}
 
 	return nil
+}
+
+func StatsFromProto(s *controlpb.Stats) model.AgentStats {
+	if s == nil {
+		return model.AgentStats{}
+	}
+
+	out := model.AgentStats{
+		AgentID:       s.GetAgentId(),
+		UptimeSeconds: s.GetUptimeSeconds(),
+		WindowEnd:     s.GetWindowEnd().AsTime(),
+		Users:         make([]model.UserUsageRow, 0, len(s.GetUsers())),
+	}
+	for _, u := range s.GetUsers() {
+		out.Users = append(out.Users, model.UserUsageRow{
+			UserID:    u.GetUserId(),
+			BytesUp:   u.GetBytesUp(),
+			BytesDown: u.GetBytesDown(),
+			IPCount:   u.GetIpCount(),
+		})
+	}
+	return out
 }

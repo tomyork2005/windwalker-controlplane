@@ -14,7 +14,6 @@ type session struct {
 	driverTypes map[string]struct{}
 
 	sendCh     chan model.Operation
-	lastSeq    atomic.Uint64
 	recovering atomic.Bool
 
 	ctx    context.Context
@@ -63,7 +62,7 @@ func (r *Hub) TrySend(op model.Operation) error {
 	case s.sendCh <- op:
 		return nil
 	default:
-		return errors.New("unknown error when trySend to agent")
+		return errors.New("agent send buffer full")
 	}
 }
 

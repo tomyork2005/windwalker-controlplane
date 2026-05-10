@@ -5,21 +5,19 @@ import (
 	"control-plane/internal/model"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 )
 
 const retriesLimit = 10
 
 type DispatchStorage interface {
-	NextSeq(ctx context.Context, agentID string) (uint64, error)
-	EnqueueTask(ctx context.Context, task *model.AgentTask) error
-	FetchPendingTasks(ctx context.Context, agentID string, fromExclusive uint64, retriesLimit int, limit int) ([]*model.AgentTask, error)
+	EnqueueTask(ctx context.Context, task *model.AgentTask) (int64, error)
+	FetchPendingTasks(ctx context.Context, agentID string, fromExclusiveID int64, retriesLimit int, limit int) ([]*model.AgentTask, error)
 
-	MarkTaskSent(ctx context.Context, agentID string, seq uint64) error
-	MarkTaskAck(ctx context.Context, agentID string, seq uint64) error
-	MarkTaskNack(ctx context.Context, agentID string, seq uint64, errMsg string) error
-	IncTaskRetries(ctx context.Context, agentID string, seq uint64, errMsg string) error
-	GetRequestIDByAgentSeq(ctx context.Context, agentID string, seq uint64) (string, error)
+	MarkTaskSent(ctx context.Context, taskID int64) error
+	MarkTaskAck(ctx context.Context, agentID string, requestID string) error
+	MarkTaskNack(ctx context.Context, agentID string, requestID string, errMsg string) error
+	IncTaskRetries(ctx context.Context, taskID int64, errMsg string) error
 
 	WithTx(ctx context.Context, fn func(ctx context.Context) error) error
 }
@@ -46,15 +44,8 @@ func (d *Dispatcher) DispatchUpsert(ctx context.Context, agentID string, subscri
 		return nil, fmt.Errorf("marshal upsert payload: %w", err)
 	}
 
-	var seq uint64
-	seq, err = d.store.NextSeq(ctx, agentID)
-	if err != nil {
-		return nil, err
-	}
-
-	err = d.store.EnqueueTask(ctx, &model.AgentTask{
+	taskID, err := d.store.EnqueueTask(ctx, &model.AgentTask{
 		AgentID:   agentID,
-		Seq:       seq,
 		RequestID: subscriptionID,
 		Kind:      model.OpUpsert,
 		Payload:   payload,
@@ -65,48 +56,11 @@ func (d *Dispatcher) DispatchUpsert(ctx context.Context, agentID string, subscri
 
 	return &model.Operation{
 		AgentID:   agentID,
-		Seq:       seq,
+		TaskID:    taskID,
 		RequestID: subscriptionID,
 		Kind:      model.OpUpsert,
 		Upsert:    up,
 	}, nil
-}
-
-func (d *Dispatcher) DispatchRenew(ctx context.Context, agentID string, requestID string, rn *model.AgentRenewPayload) error {
-	payload, err := json.Marshal(rn)
-	if err != nil {
-		return fmt.Errorf("marshal renew payload: %w", err)
-	}
-
-	var seq uint64
-	err = d.store.WithTx(ctx, func(ctx context.Context) error {
-		seq, err = d.store.NextSeq(ctx, agentID)
-		if err != nil {
-			return err
-		}
-
-		return d.store.EnqueueTask(ctx, &model.AgentTask{
-			AgentID:   agentID,
-			Seq:       seq,
-			RequestID: requestID,
-			Kind:      model.OpRenew,
-			Payload:   payload,
-		})
-	})
-	if err != nil {
-		return fmt.Errorf("enqueue renew task: %w", err)
-	}
-
-	op := model.Operation{
-		AgentID:   agentID,
-		Seq:       seq,
-		RequestID: requestID,
-		Kind:      model.OpRenew,
-		Renew:     rn,
-	}
-
-	d.trySend(ctx, op)
-	return nil
 }
 
 func (d *Dispatcher) DispatchRemove(ctx context.Context, agentID string, requestID string, rm *model.AgentRemovePayload) error {
@@ -115,20 +69,11 @@ func (d *Dispatcher) DispatchRemove(ctx context.Context, agentID string, request
 		return fmt.Errorf("marshal remove payload: %w", err)
 	}
 
-	var seq uint64
-	err = d.store.WithTx(ctx, func(ctx context.Context) error {
-		seq, err = d.store.NextSeq(ctx, agentID)
-		if err != nil {
-			return err
-		}
-
-		return d.store.EnqueueTask(ctx, &model.AgentTask{
-			AgentID:   agentID,
-			Seq:       seq,
-			RequestID: requestID,
-			Kind:      model.OpRemove,
-			Payload:   payload,
-		})
+	taskID, err := d.store.EnqueueTask(ctx, &model.AgentTask{
+		AgentID:   agentID,
+		RequestID: requestID,
+		Kind:      model.OpRemove,
+		Payload:   payload,
 	})
 	if err != nil {
 		return fmt.Errorf("enqueue remove task: %w", err)
@@ -136,7 +81,7 @@ func (d *Dispatcher) DispatchRemove(ctx context.Context, agentID string, request
 
 	op := model.Operation{
 		AgentID:   agentID,
-		Seq:       seq,
+		TaskID:    taskID,
 		RequestID: requestID,
 		Kind:      model.OpRemove,
 		Remove:    rm,
@@ -150,8 +95,8 @@ func (d *Dispatcher) TryDispatchPrepared(ctx context.Context, op *model.Operatio
 	d.trySend(ctx, *op)
 }
 
-func (d *Dispatcher) RecoverPending(ctx context.Context, agentID string, fromExclusive uint64, limit int) error {
-	from := fromExclusive
+func (d *Dispatcher) RecoverPending(ctx context.Context, agentID string, fromExclusiveID int64, limit int) error {
+	from := fromExclusiveID
 
 	for {
 		tasks, err := d.store.FetchPendingTasks(ctx, agentID, from, retriesLimit, limit)
@@ -170,17 +115,18 @@ func (d *Dispatcher) RecoverPending(ctx context.Context, agentID string, fromExc
 			}
 
 			if err = d.sender.TrySend(op); err != nil {
-				if incErr := d.store.IncTaskRetries(ctx, task.AgentID, task.Seq, err.Error()); incErr != nil {
+				if incErr := d.store.IncTaskRetries(ctx, task.ID, err.Error()); incErr != nil {
 					return fmt.Errorf("inc task retries: %w", incErr)
 				}
+				from = task.ID
 				continue
 			}
 
-			if err := d.store.MarkTaskSent(ctx, task.AgentID, task.Seq); err != nil {
+			if err := d.store.MarkTaskSent(ctx, task.ID); err != nil {
 				return fmt.Errorf("mark task sent: %w", err)
 			}
 
-			from = task.Seq
+			from = task.ID
 		}
 
 		if len(tasks) < limit {
@@ -189,23 +135,24 @@ func (d *Dispatcher) RecoverPending(ctx context.Context, agentID string, fromExc
 	}
 }
 
-func (d *Dispatcher) HandleAck(ctx context.Context, agentID string, seq uint64) error {
-	return d.store.MarkTaskAck(ctx, agentID, seq)
+func (d *Dispatcher) HandleAck(ctx context.Context, agentID string, requestID string) error {
+	return d.store.MarkTaskAck(ctx, agentID, requestID)
 }
 
-func (d *Dispatcher) HandleNack(ctx context.Context, agentID string, seq uint64, errMsg string) error {
-	return d.store.MarkTaskNack(ctx, agentID, seq, errMsg)
-}
-
-func (d *Dispatcher) GetRequestIDByAgentSeq(ctx context.Context, agentID string, seq uint64) (string, error) {
-	return d.store.GetRequestIDByAgentSeq(ctx, agentID, seq)
+func (d *Dispatcher) HandleNack(ctx context.Context, agentID string, requestID string, errMsg string) error {
+	return d.store.MarkTaskNack(ctx, agentID, requestID, errMsg)
 }
 
 func (d *Dispatcher) trySend(ctx context.Context, op model.Operation) {
 	if err := d.sender.TrySend(op); err != nil {
-		log.Printf("fail trySend op=%+v err=%v", op, err)
+		slog.Warn("dispatcher trySend failed", "agent_id", op.AgentID, "request_id", op.RequestID, "kind", op.Kind, "err", err)
 		return
 	}
 
-	_ = d.store.MarkTaskSent(ctx, op.AgentID, op.Seq)
+	if op.TaskID == 0 {
+		return
+	}
+	if err := d.store.MarkTaskSent(ctx, op.TaskID); err != nil {
+		slog.Error("mark task sent after trySend", "task_id", op.TaskID, "err", err)
+	}
 }

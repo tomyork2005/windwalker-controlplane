@@ -12,7 +12,7 @@ telegram:
   main_menu_image_path: "/app/assets/main-menu.jpg"
 
 agent:
-  heartbeat_interval: 1
+  stats_deadline: 90
 
 cleaner:
   expiry_warnings:

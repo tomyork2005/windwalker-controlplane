@@ -3,64 +3,64 @@ package pgx
 import (
 	"context"
 	"control-plane/internal/model"
+	"errors"
 	"fmt"
+
 	"github.com/georgysavva/scany/v2/pgxscan"
+	"github.com/jackc/pgx/v5"
 )
 
-func (s *Storage) NextSeq(ctx context.Context, agentID string) (uint64, error) {
-	const query = `
-		INSERT INTO agent_seq (agent_id, last_seq)
-		VALUES ($1, 1)
-		ON CONFLICT (agent_id)
-		DO UPDATE SET last_seq = agent_seq.last_seq + 1
-		RETURNING last_seq
-	`
-
-	var seq uint64
-	if err := s.getExecutor(ctx).QueryRow(ctx, query, agentID).Scan(&seq); err != nil {
-		return 0, fmt.Errorf("next seq: %w", err)
-	}
-
-	return seq, nil
-}
-
-func (s *Storage) EnqueueTask(ctx context.Context, task *model.AgentTask) error {
+func (s *Storage) EnqueueTask(ctx context.Context, task *model.AgentTask) (int64, error) {
 	if task == nil {
-		return fmt.Errorf("agent task is nil")
+		return 0, fmt.Errorf("agent task is nil")
 	}
 
 	const query = `
 		INSERT INTO agent_tasks (
 			agent_id,
-			seq,
 			request_id,
 			kind,
 			payload
-		) VALUES ($1, $2, $3, $4, $5)
+		) VALUES ($1, $2, $3, $4)
+		ON CONFLICT (agent_id, request_id, kind) DO NOTHING
+		RETURNING id
 	`
 
-	_, err := s.getExecutor(ctx).Exec(
+	var id int64
+	err := s.getExecutor(ctx).QueryRow(
 		ctx,
 		query,
 		task.AgentID,
-		task.Seq,
 		task.RequestID,
 		task.Kind,
 		task.Payload,
-	)
+	).Scan(&id)
 	if err != nil {
-		return fmt.Errorf("enqueue task: %w", err)
+		// pgx возвращает ErrNoRows если ON CONFLICT DO NOTHING не вставил строку.
+		// Идемпотентный no-op — лезем за существующим id.
+		if errors.Is(err, pgx.ErrNoRows) {
+			const lookup = `
+				SELECT id
+				FROM agent_tasks
+				WHERE agent_id = $1 AND request_id = $2 AND kind = $3
+				LIMIT 1
+			`
+			if lookupErr := pgxscan.Get(ctx, s.getExecutor(ctx), &id, lookup, task.AgentID, task.RequestID, task.Kind); lookupErr != nil {
+				return 0, fmt.Errorf("enqueue task lookup after conflict: %w", lookupErr)
+			}
+			return id, nil
+		}
+		return 0, fmt.Errorf("enqueue task: %w", err)
 	}
 
-	return nil
+	return id, nil
 }
 
-func (s *Storage) FetchPendingTasks(ctx context.Context, agentID string, fromExclusive uint64, retriesLimit int, limit int) ([]*model.AgentTask, error) {
+func (s *Storage) FetchPendingTasks(ctx context.Context, agentID string, fromExclusiveID int64, retriesLimit int, limit int) ([]*model.AgentTask, error) {
 	const query = `
 		SELECT
 			id,
 			agent_id,
-			seq,
 			request_id,
 			kind,
 			payload,
@@ -72,33 +72,32 @@ func (s *Storage) FetchPendingTasks(ctx context.Context, agentID string, fromExc
 			created_at
 		FROM agent_tasks
 		WHERE agent_id = $1
-		  AND seq > $2
+		  AND id > $2
 		  AND done_at IS NULL
 		  AND retries < $3
-		ORDER BY seq ASC
+		ORDER BY id ASC
 		LIMIT $4
 	`
 
 	var rows []*model.AgentTask
-	if err := pgxscan.Select(ctx, s.getExecutor(ctx), &rows, query, agentID, fromExclusive, retriesLimit, limit); err != nil {
+	if err := pgxscan.Select(ctx, s.getExecutor(ctx), &rows, query, agentID, fromExclusiveID, retriesLimit, limit); err != nil {
 		return nil, fmt.Errorf("fetch pending tasks: %w", err)
 	}
 
 	return rows, nil
 }
 
-func (s *Storage) MarkTaskSent(ctx context.Context, agentID string, seq uint64) error {
+func (s *Storage) MarkTaskSent(ctx context.Context, taskID int64) error {
 	const query = `
 		UPDATE agent_tasks
 		SET
 			sent_at = COALESCE(sent_at, now()),
 			retries = retries + 1
-		WHERE agent_id = $1
-		  AND seq = $2
+		WHERE id = $1
 		  AND done_at IS NULL
 	`
 
-	_, err := s.getExecutor(ctx).Exec(ctx, query, agentID, seq)
+	_, err := s.getExecutor(ctx).Exec(ctx, query, taskID)
 	if err != nil {
 		return fmt.Errorf("mark task sent: %w", err)
 	}
@@ -106,19 +105,22 @@ func (s *Storage) MarkTaskSent(ctx context.Context, agentID string, seq uint64) 
 	return nil
 }
 
-func (s *Storage) MarkTaskAck(ctx context.Context, agentID string, seq uint64) error {
+func (s *Storage) MarkTaskAck(ctx context.Context, agentID string, requestID string) error {
 	const query = `
 		UPDATE agent_tasks
 		SET
 			done_at = now(),
 			ok = TRUE,
 			error = ''
-		WHERE agent_id = $1
-		  AND seq = $2
-		  AND done_at IS NULL
+		WHERE id = (
+			SELECT id FROM agent_tasks
+			WHERE agent_id = $1 AND request_id = $2 AND done_at IS NULL
+			ORDER BY id ASC
+			LIMIT 1
+		)
 	`
 
-	_, err := s.getExecutor(ctx).Exec(ctx, query, agentID, seq)
+	_, err := s.getExecutor(ctx).Exec(ctx, query, agentID, requestID)
 	if err != nil {
 		return fmt.Errorf("mark task ack: %w", err)
 	}
@@ -126,19 +128,22 @@ func (s *Storage) MarkTaskAck(ctx context.Context, agentID string, seq uint64) e
 	return nil
 }
 
-func (s *Storage) MarkTaskNack(ctx context.Context, agentID string, seq uint64, errMsg string) error {
+func (s *Storage) MarkTaskNack(ctx context.Context, agentID string, requestID string, errMsg string) error {
 	const query = `
 		UPDATE agent_tasks
 		SET
 			done_at = now(),
 			ok = FALSE,
 			error = $3
-		WHERE agent_id = $1
-		  AND seq = $2
-		  AND done_at IS NULL
+		WHERE id = (
+			SELECT id FROM agent_tasks
+			WHERE agent_id = $1 AND request_id = $2 AND done_at IS NULL
+			ORDER BY id ASC
+			LIMIT 1
+		)
 	`
 
-	_, err := s.getExecutor(ctx).Exec(ctx, query, agentID, seq, errMsg)
+	_, err := s.getExecutor(ctx).Exec(ctx, query, agentID, requestID, errMsg)
 	if err != nil {
 		return fmt.Errorf("mark task nack: %w", err)
 	}
@@ -146,18 +151,17 @@ func (s *Storage) MarkTaskNack(ctx context.Context, agentID string, seq uint64, 
 	return nil
 }
 
-func (s *Storage) IncTaskRetries(ctx context.Context, agentID string, seq uint64, errMsg string) error {
+func (s *Storage) IncTaskRetries(ctx context.Context, taskID int64, errMsg string) error {
 	const query = `
 		UPDATE agent_tasks
 		SET
 			retries = retries + 1,
-			error = $3
-		WHERE agent_id = $1
-		  AND seq = $2
+			error = $2
+		WHERE id = $1
 		  AND done_at IS NULL
 	`
 
-	_, err := s.getExecutor(ctx).Exec(ctx, query, agentID, seq, errMsg)
+	_, err := s.getExecutor(ctx).Exec(ctx, query, taskID, errMsg)
 	if err != nil {
 		return fmt.Errorf("inc task retries: %w", err)
 	}

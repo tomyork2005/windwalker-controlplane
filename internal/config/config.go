@@ -37,7 +37,7 @@ type TelegramConfig struct {
 }
 
 type AgentConfig struct {
-	HeartbeatIntervalMinutes int `yaml:"heartbeat_interval" env:"HEARTBEAT_INTERVAL"`
+	StatsDeadlineSeconds int `yaml:"stats_deadline" env:"AGENT_STATS_DEADLINE" env-default:"90"`
 }
 
 type CleanerConfig struct {

@@ -194,7 +194,7 @@ func TestProcessService_ProcessPaymentCallback(t *testing.T) {
 			wantErrIs: payment.ErrBadSignature,
 		},
 		{
-			name: "renewal_active_extends_end_at_and_emits_three_events",
+			name: "renewal_active_extends_end_at_and_emits_two_events",
 			callback: model.CallbackOutput{
 				ProviderName:   providerName,
 				PaymentOrderID: providerOrderID,
@@ -248,12 +248,6 @@ func TestProcessService_ProcessPaymentCallback(t *testing.T) {
 					seen[eventType]++
 					switch eventType {
 					case model.EventTypeInvoicePaidNotification:
-					case model.EventTypeSubscriptionRenewed:
-						ev, ok := payload.(model.SubscriptionRenewedEvent)
-						require.True(t, ok)
-						assert.Equal(t, subID, ev.SubscriptionID)
-						assert.Equal(t, agentID, ev.AgentID)
-						assert.True(t, ev.NewEndAt.Equal(expectedNewEnd))
 					case model.EventTypeSubscriptionRenewedNotification:
 						ev, ok := payload.(model.SubscriptionRenewedNotificationEvent)
 						require.True(t, ok)
@@ -266,7 +260,6 @@ func TestProcessService_ProcessPaymentCallback(t *testing.T) {
 				})
 				t.Cleanup(func() {
 					assert.Equal(t, 1, seen[model.EventTypeInvoicePaidNotification])
-					assert.Equal(t, 1, seen[model.EventTypeSubscriptionRenewed])
 					assert.Equal(t, 1, seen[model.EventTypeSubscriptionRenewedNotification])
 				})
 			},

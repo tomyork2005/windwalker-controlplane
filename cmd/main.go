@@ -61,13 +61,14 @@ func main() {
 	hub := agent.NewHub()
 	dispatcher := service.NewDispatcher(storage, hub)
 
-	agentReceiver := service.NewAgentReceiver(storage, time.Minute*time.Duration(cfg.HeartbeatIntervalMinutes))
+	statsTTL := time.Second * time.Duration(cfg.StatsDeadlineSeconds)
+	agentReceiver := service.NewAgentReceiver(storage, statsTTL)
 	agentSender := service.NewAgentSender(storage, dispatcher)
 
 	grpcServer := grpc.NewServer()
 	controlpb.RegisterControlPlaneServer(
 		grpcServer,
-		agent.NewServer(agentReceiver, dispatcher, hub, time.Minute*time.Duration(cfg.HeartbeatIntervalMinutes)),
+		agent.NewServer(agentReceiver, dispatcher, hub, statsTTL),
 	)
 
 	worker := workers.NewWorker(storage, agentSender, bot)

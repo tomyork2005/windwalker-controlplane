@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"control-plane/internal/model"
-	"errors"
 	"fmt"
 	"html"
 	"log/slog"
@@ -12,7 +11,8 @@ import (
 
 type AgentReceiverStorage interface {
 	UpsertAgent(ctx context.Context, agent *model.Agent) error
-	UpdateAgentHeartbeat(ctx context.Context, agentID string, uptime uint64, seenAt, deadline time.Time) error
+	UpdateAgentStats(ctx context.Context, agentID string, uptime uint64, seenAt, deadline time.Time) error
+	InsertUserTrafficBatch(ctx context.Context, agentID string, windowEnd time.Time, rows []model.UserUsageRow) error
 	ResolveChatIDBySubscribeID(ctx context.Context, subscribeID string) (int64, error)
 	StoreSubscriptionCreds(ctx context.Context, subscriptionID string, creds string) error
 	SaveOutboxEvent(ctx context.Context, eventType string, payload any) error
@@ -26,19 +26,18 @@ type VPNCreds interface {
 }
 
 type AgentReceiver struct {
-	store AgentReceiverStorage
-
-	hbTTL time.Duration
+	store    AgentReceiverStorage
+	statsTTL time.Duration
 }
 
-func NewAgentReceiver(store AgentReceiverStorage, hbTTL time.Duration) *AgentReceiver {
-	if hbTTL <= 0 {
-		hbTTL = 60 * time.Second
+func NewAgentReceiver(store AgentReceiverStorage, statsTTL time.Duration) *AgentReceiver {
+	if statsTTL <= 0 {
+		statsTTL = 90 * time.Second
 	}
 
 	return &AgentReceiver{
-		store: store,
-		hbTTL: hbTTL,
+		store:    store,
+		statsTTL: statsTTL,
 	}
 }
 
@@ -47,25 +46,32 @@ func (s *AgentReceiver) RegisterAgent(ctx context.Context, agent *model.Agent) e
 		return err
 	}
 
-	err := s.store.UpsertAgent(ctx, agent)
-	if err != nil {
+	if err := s.store.UpsertAgent(ctx, agent); err != nil {
 		slog.Error("Failed to register agent", "error", err)
 		return fmt.Errorf("fail upsert agent: %w", err)
-	}
-
-	now := time.Now()
-	err = s.store.UpdateAgentHeartbeat(ctx, agent.ID, 0, now, now.Add(s.hbTTL))
-	if err != nil {
-		slog.Error("Failed to update agent heartbeat", "error", err)
-		return fmt.Errorf("fail update heartbeat: %w", err)
 	}
 
 	return nil
 }
 
-func (s *AgentReceiver) Heartbeat(ctx context.Context, agentID string, uptimeSeconds uint32) error {
+func (s *AgentReceiver) HandleStats(ctx context.Context, stats model.AgentStats) error {
+	if stats.AgentID == "" {
+		return fmt.Errorf("handle stats: empty agent_id")
+	}
+
 	now := time.Now()
-	return s.store.UpdateAgentHeartbeat(ctx, agentID, uint64(uptimeSeconds), now, now.Add(s.hbTTL))
+	return s.store.WithTx(ctx, func(ctx context.Context) error {
+		if err := s.store.UpdateAgentStats(ctx, stats.AgentID, uint64(stats.UptimeSeconds), now, now.Add(s.statsTTL)); err != nil {
+			return fmt.Errorf("update agent stats: %w", err)
+		}
+		if len(stats.Users) == 0 {
+			return nil
+		}
+		if err := s.store.InsertUserTrafficBatch(ctx, stats.AgentID, stats.WindowEnd, stats.Users); err != nil {
+			return fmt.Errorf("insert user traffic batch: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *AgentReceiver) HandleStartUserSubscribeResponse(ctx context.Context, subscribeID string, creds VPNCreds) error {
@@ -98,14 +104,4 @@ func (s *AgentReceiver) HandleStartUserSubscribeResponse(ctx context.Context, su
 		}
 		return nil
 	})
-}
-
-func (s *AgentReceiver) HandleRemoveCallback(_ context.Context) error {
-	return errors.New("not implemented yet")
-}
-func (s *AgentReceiver) HandleStatsAll(_ context.Context) error {
-	return errors.New("not implemented yet")
-}
-func (s *AgentReceiver) HandleError(_ context.Context) error {
-	return errors.New("not implemented yet")
 }

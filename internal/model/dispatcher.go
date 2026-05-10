@@ -9,7 +9,6 @@ import (
 type AgentTask struct {
 	ID        int64         `db:"id"`
 	AgentID   string        `db:"agent_id"`
-	Seq       uint64        `db:"seq"`
 	RequestID string        `db:"request_id"`
 	Kind      OperationKind `db:"kind"`
 	Payload   []byte        `db:"payload"`
@@ -29,7 +28,7 @@ func TaskToOperation(task *AgentTask) (Operation, error) {
 
 	op := Operation{
 		AgentID:   task.AgentID,
-		Seq:       task.Seq,
+		TaskID:    task.ID,
 		RequestID: task.RequestID,
 		Kind:      task.Kind,
 	}
@@ -49,14 +48,6 @@ func TaskToOperation(task *AgentTask) (Operation, error) {
 			return Operation{}, fmt.Errorf("unmarshal remove payload: %w", err)
 		}
 		op.Remove = &payload
-		return op, nil
-
-	case OpRenew:
-		var payload AgentRenewPayload
-		if err := json.Unmarshal(task.Payload, &payload); err != nil {
-			return Operation{}, fmt.Errorf("unmarshal renew payload: %w", err)
-		}
-		op.Renew = &payload
 		return op, nil
 
 	default:
