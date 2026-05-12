@@ -12,7 +12,7 @@ import (
 type AgentReceiverStorage interface {
 	UpsertAgent(ctx context.Context, agent *model.Agent) error
 	UpdateAgentStats(ctx context.Context, agentID string, uptime uint64, seenAt, deadline time.Time) error
-	InsertUserTrafficBatch(ctx context.Context, agentID string, windowEnd time.Time, rows []model.UserUsageRow) error
+	UpsertUserTrafficBatch(ctx context.Context, agentID string, windowEnd time.Time, rows []model.UserUsageRow) error
 	ResolveChatIDBySubscribeID(ctx context.Context, subscribeID string) (int64, error)
 	StoreSubscriptionCreds(ctx context.Context, subscriptionID string, creds string) error
 	SaveOutboxEvent(ctx context.Context, eventType string, payload any) error
@@ -67,8 +67,8 @@ func (s *AgentReceiver) HandleStats(ctx context.Context, stats model.AgentStats)
 		if len(stats.Users) == 0 {
 			return nil
 		}
-		if err := s.store.InsertUserTrafficBatch(ctx, stats.AgentID, stats.WindowEnd, stats.Users); err != nil {
-			return fmt.Errorf("insert user traffic batch: %w", err)
+		if err := s.store.UpsertUserTrafficBatch(ctx, stats.AgentID, stats.WindowEnd, stats.Users); err != nil {
+			return fmt.Errorf("upsert user traffic batch: %w", err)
 		}
 		return nil
 	})
