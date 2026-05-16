@@ -8,7 +8,7 @@
 
 ```bash
 # Запуск сервиса (CONFIG_PATH обязателен — MustLoadConfig паникует без него)
-CONFIG_PATH=config/config.yaml go run ./cmd
+CONFIG_PATH=config/config.docker.yaml go run ./cmd
 
 go build ./...
 go vet ./...
@@ -134,11 +134,10 @@ cp .env.example .env                 # отредактировать ACME_EMAIL
 
 ### Конфиг
 
-`internal/config` использует `cleanenv` (YAML + env-оверрайды). Переменная `CONFIG_PATH` **обязательна** — отсутствующий/невалидный файл = `log.Fatal`. В репозитории два YAML:
-- `config/config.yaml` — для локального запуска (`127.0.0.1:5433` в DSN).
-- `config/config.docker.yaml` — для docker-compose (`postgres:5432` в DSN, `webhook_public_url` боевой домен). Именно он монтируется в `control-plane`-контейнер как `/app/config.yaml`.
+`internal/config` использует `cleanenv` (YAML + env-оверрайды). Переменная `CONFIG_PATH` **обязательна** — отсутствующий/невалидный файл = `log.Fatal`. В репозитории один YAML:
+- `config/config.docker.yaml` — для docker-compose (`postgres:5432` в DSN, `webhook_public_url` боевой домен). Именно он монтируется в `control-plane`-контейнер как `/app/config.yaml`. Локального `config/config.yaml` больше нет — он был удалён за ненадобностью (локально сервис не запускается, см. раздел «Команды»).
 
-Оба файла закоммичены с реальными секретами — репа приватная, пользователь осознанно так хранит. Не ругай, просто не распространяй дальше. **Секреты Platega (`merchant_id`/`secret`)** в коммите оставлены пустыми — заполнить из ЛК Platega перед первым прогоном.
+Файл закоммичен с реальными секретами — репа приватная, пользователь осознанно так хранит. Не ругай, просто не распространяй дальше.
 
 ## Известные шероховатости и ограничения
 
