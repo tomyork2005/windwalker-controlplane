@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"html"
 	"strings"
+	"time"
 
 	tele "gopkg.in/telebot.v4"
 )
+
+var mskZone = time.FixedZone("MSK", 3*60*60)
 
 const mainMenuText = `🕊️ <b>Wind-Walker VPN</b>
 
@@ -88,7 +91,7 @@ func (b *Bot) renderMySubscription(ctx context.Context, c tele.Context) error {
 	fmt.Fprintf(&sb, "🏷 <b>Тариф:</b> %s\n", html.EscapeString(planLabel))
 	fmt.Fprintf(&sb, "🌍 <b>Регион:</b> %s\n", html.EscapeString(regionLabel(sub.Region)))
 	fmt.Fprintf(&sb, "🛡 <b>Протокол:</b> %s\n", html.EscapeString(strings.ToUpper(sub.DriverType)))
-	fmt.Fprintf(&sb, "⏳ <b>Действует до:</b> %s\n", sub.EndAt.Format("02.01.2006 15:04"))
+	fmt.Fprintf(&sb, "⏳ <b>Действует до:</b> %s МСК\n", sub.EndAt.In(mskZone).Format("02.01.2006 15:04"))
 
 	if sub.Creds != nil && *sub.Creds != "" {
 		sb.WriteString("\n🔗 <b>Ссылка для подключения:</b>\n")
