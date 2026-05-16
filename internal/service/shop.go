@@ -165,6 +165,7 @@ func (s *ShopService) ActivateTrial(ctx context.Context, telegramID int64, usern
 			DriverType:        plan.DriverType,
 			SubscribeDuration: trialDuration,
 			SubscriptionID:    sub.ID,
+			ChatID:            chatID,
 		}
 		return s.outbox.SaveOutboxEvent(ctx, model.EventTypeSubscriptionActivated, event)
 	})

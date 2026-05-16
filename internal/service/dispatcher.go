@@ -44,9 +44,11 @@ func (d *Dispatcher) DispatchUpsert(ctx context.Context, agentID string, subscri
 		return nil, fmt.Errorf("marshal upsert payload: %w", err)
 	}
 
+	requestID := model.AgentRequestID(subscriptionID, model.OpUpsert)
+
 	taskID, err := d.store.EnqueueTask(ctx, &model.AgentTask{
 		AgentID:   agentID,
-		RequestID: subscriptionID,
+		RequestID: requestID,
 		Kind:      model.OpUpsert,
 		Payload:   payload,
 	})
@@ -57,17 +59,19 @@ func (d *Dispatcher) DispatchUpsert(ctx context.Context, agentID string, subscri
 	return &model.Operation{
 		AgentID:   agentID,
 		TaskID:    taskID,
-		RequestID: subscriptionID,
+		RequestID: requestID,
 		Kind:      model.OpUpsert,
 		Upsert:    up,
 	}, nil
 }
 
-func (d *Dispatcher) DispatchRemove(ctx context.Context, agentID string, requestID string, rm *model.AgentRemovePayload) error {
+func (d *Dispatcher) DispatchRemove(ctx context.Context, agentID string, subscriptionID string, rm *model.AgentRemovePayload) error {
 	payload, err := json.Marshal(rm)
 	if err != nil {
 		return fmt.Errorf("marshal remove payload: %w", err)
 	}
+
+	requestID := model.AgentRequestID(subscriptionID, model.OpRemove)
 
 	taskID, err := d.store.EnqueueTask(ctx, &model.AgentTask{
 		AgentID:   agentID,

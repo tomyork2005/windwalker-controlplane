@@ -17,9 +17,9 @@ const (
 
 const (
 	msgInvoicePaid      = "Счёт оплачен. Готовим ваше подключение, ожидайте..."
-	msgDeliveryFailed   = "Не удалось автоматически выдать доступ. Напишите в поддержку — мы уже разбираемся."
-	msgExpiringTemplate = "Подписка истекает через %s. Продлите через /start, чтобы не потерять доступ."
-	msgExpired          = "Подписка закончилась. Продлите через /start, чтобы возобновить доступ."
+	msgDeliveryFailed   = "Не удалось автоматически выдать доступ. Обязательно свяжитесь с саппортом — мы оперативно поможем. Кнопка «Поддержка» в главном меню."
+	msgExpiringTemplate = "Подписка закончится через %s. Продлите сейчас через /start — без переподключения, потери трафика и новой ссылки."
+	msgExpired          = "Подписка завершена. Нажмите /start, чтобы вернуть быстрый и безопасный интернет."
 	msgRenewedTemplate  = "Подписка продлена до %s. Переподключаться не нужно."
 )
 
@@ -161,29 +161,47 @@ func (w *Worker) resolveEvent(ctx context.Context, event model.OutboxEvent) erro
 	}
 }
 
-// maybeEscalate fires a one-shot DeliveryFailedNotification when a creds_delivery
-// event has exhausted its retry budget. Best-effort — we log and move on if it fails;
+// maybeEscalate fires a one-shot DeliveryFailedNotification when an event has
+// exhausted its retry budget. Best-effort — we log and move on if it fails;
 // the original event will still be marked failed by the caller.
 func (w *Worker) maybeEscalate(ctx context.Context, event model.OutboxEvent, cause error) {
-	if event.EventType != model.EventTypeCredsDelivery {
-		return
-	}
 	if event.Attempts+1 < maxProcessAttempts {
 		return
 	}
 
-	var delivery model.CredsDeliveryEvent
-	if err := json.Unmarshal(event.Payload, &delivery); err != nil {
-		slog.Error("escalate: unmarshal creds_delivery payload", "err", err)
-		return
-	}
+	switch event.EventType {
+	case model.EventTypeCredsDelivery:
+		var delivery model.CredsDeliveryEvent
+		if err := json.Unmarshal(event.Payload, &delivery); err != nil {
+			slog.Error("escalate: unmarshal creds_delivery payload", "err", err)
+			return
+		}
+		w.emitDeliveryFailed(ctx, delivery.SubscriptionID, delivery.ChatID,
+			"creds_delivery exhausted — escalating to delivery_failed_notification", cause)
 
-	slog.Warn("creds_delivery exhausted — escalating to delivery_failed_notification",
-		"subscription_id", delivery.SubscriptionID, "chat_id", delivery.ChatID, "cause", cause)
+	case model.EventTypeSubscriptionActivated:
+		var activated model.SubscriptionActivatedEvent
+		if err := json.Unmarshal(event.Payload, &activated); err != nil {
+			slog.Error("escalate: unmarshal subscription_activated payload", "err", err)
+			return
+		}
+		if activated.ChatID == 0 {
+			// Legacy in-flight event без chat_id — TG-уведомление не отправим.
+			slog.Warn("escalate: subscription_activated has empty chat_id, skipping notification",
+				"subscription_id", activated.SubscriptionID)
+			return
+		}
+		w.emitDeliveryFailed(ctx, activated.SubscriptionID, activated.ChatID,
+			"subscription_activated exhausted — escalating to delivery_failed_notification", cause)
+	}
+}
+
+func (w *Worker) emitDeliveryFailed(ctx context.Context, subscriptionID string, chatID int64, msg string, cause error) {
+	slog.Warn(msg, "subscription_id", subscriptionID, "chat_id", chatID, "cause", cause)
 
 	failed := model.DeliveryFailedNotificationEvent{
-		SubscriptionID: delivery.SubscriptionID,
-		ChatID:         delivery.ChatID,
+		SubscriptionID: subscriptionID,
+		ChatID:         chatID,
 	}
 	if err := w.storage.SaveOutboxEvent(ctx, model.EventTypeDeliveryFailedNotification, failed); err != nil {
 		slog.Error("escalate: save delivery_failed_notification", "err", err)

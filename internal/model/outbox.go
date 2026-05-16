@@ -20,6 +20,7 @@ type SubscriptionActivatedEvent struct {
 	SubscribeDuration time.Duration `json:"subscribe_time"`
 
 	SubscriptionID string `json:"subscription_id"`
+	ChatID         int64  `json:"chat_id"`
 }
 
 type SubscriptionCancelEvent struct {

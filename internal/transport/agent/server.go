@@ -220,7 +220,8 @@ func (s *Server) handleResponse(ctx context.Context, agentID string, resp *contr
 
 	switch b := resp.Body.(type) {
 	case *controlpb.Response_Upsert:
-		if err := s.svc.HandleStartUserSubscribeResponse(ctx, reqID, VPNCredsFromProto(b)); err != nil {
+		subID := model.SubscriptionIDFromRequestID(reqID)
+		if err := s.svc.HandleStartUserSubscribeResponse(ctx, subID, VPNCredsFromProto(b)); err != nil {
 			slog.Error("upsert response handling failed — task left pending for recovery",
 				"agent_id", agentID, "request_id", reqID, "err", err)
 			return err
@@ -228,6 +229,7 @@ func (s *Server) handleResponse(ctx context.Context, agentID string, resp *contr
 		return s.dispatcher.HandleAck(ctx, agentID, reqID)
 
 	case *controlpb.Response_Remove:
+		slog.Info("agent confirmed user removal", "agent_id", agentID, "request_id", reqID)
 		return s.dispatcher.HandleAck(ctx, agentID, reqID)
 
 	case *controlpb.Response_Error:

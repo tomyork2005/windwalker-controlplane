@@ -118,6 +118,7 @@ func (s *ProcessService) processNewSubscription(ctx context.Context, inv *model.
 		DriverType:        plan.DriverType,
 		SubscribeDuration: time.Hour * time.Duration(24*plan.DurationDays),
 		SubscriptionID:    sub.ID,
+		ChatID:            sub.ChatID,
 	}
 	return s.outbox.SaveOutboxEvent(ctx, model.EventTypeSubscriptionActivated, event)
 }

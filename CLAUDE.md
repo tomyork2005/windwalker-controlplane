@@ -18,7 +18,7 @@ go test ./internal/service/... -run TestX  # один пакет / один те
 
 > **Локально пользователь не запускает.** Проверка перед коммитом — только `go build ./... && go vet ./... && go test ./...`. Smoke-test и end-to-end проверки выполняются на VPS после `git push` + `./deploy.sh`. Не предлагать запуск через `go run` или local-compose как часть верификации.
 >
-> **Миграции дополняем на месте.** Реальных пользователей в БД пока нет; перед деплоем БД может быть снесена и применена заново. Поэтому при необходимости небольших добавлений к схеме (новые индексы / nullable-колонки) — расширяем существующую миграцию, а не плодим новый файл `00NNN_*.sql`. Новый файл — только для фундаментально новых таблиц.
+> **Миграции — только новые файлы.** В БД есть реальные пользователи; сносить и пересоздавать схему нельзя. Любое изменение схемы — новый файл `migrations/00NNN_*.sql` с корректными `-- +goose Up` / `-- +goose Down`. Дополнять существующие миграции запрещено.
 
 Миграции в формате **goose** (маркеры `-- +goose Up` / `-- +goose Down` в `migrations/*.sql`). Локально применяются так:
 
@@ -28,7 +28,7 @@ goose -dir migrations postgres "postgres://postgres:postgres@127.0.0.1:5433/cont
 
 В docker-compose миграции применяются автоматически сервисом `migrate` (см. `docker-compose.yml`, стейдж `migrate` в `Dockerfile`), который ждёт healthy `postgres` и выполняет `goose up`.
 
-После свежего `goose up` **обязательно** засеять справочник `payment_methods` (миграции его не наполняют — БД ещё в стадии без реальных юзеров, эта строка перейдёт в seed-таск, когда появятся):
+После свежего `goose up` **обязательно** засеять справочник `payment_methods` (миграции его не наполняют — когда появится отдельный seed-таск, эта строка переедет туда):
 
 ```sql
 INSERT INTO payment_methods (id, name) VALUES
@@ -74,7 +74,7 @@ cp .env.example .env                 # отредактировать ACME_EMAIL
 - Каждый `Task` несёт **только** `request_id` (бизнесовый ключ идемпотентности). Никаких `seq`/`TaskMeta` нет — упрощено в новом контракте. Агент идемпотентен на стороне `tasks.request_id` (PK у него в sqlite); повторная отправка того же `request_id` при реконнекте — no-op + ack.
 - `Response` несёт обратно тот же `request_id` и тело: `Upsert{creds}` / `Remove{}` / `error string`. Если агент возвращает пустой `request_id` — CP логирует и роутить ответ не может; восстановления нет (в старом контракте было через seq, но seq больше нет).
 - Identity юзера в Xray — `user.user_id` как UUID; драйвер ожидает `user_id + "@xray.com"` как email-поле. Поддерживаемый протокол — только VLESS+Vision+REALITY.
-- `request_id` в нашем флоу = `subscription_id`. Агент не интерпретирует — echo'ит обратно.
+- `request_id` в нашем флоу = `"<subscription_id>:<kind>"` (`:upsert` / `:remove`) — суффикс с видом операции обязателен, иначе агент посчитает remove дублем upsert'а (он дедупит по `tasks.request_id` как по PK) и не применит снятие. Агент не интерпретирует — echo'ит обратно как opaque-строку. Кодирование — `model.AgentRequestID`, обратное декодирование к чистому `subscription_id` — `model.SubscriptionIDFromRequestID` (нужно только в `HandleStartUserSubscribeResponse` для resolve чата / сохранения кредов).
 - Liveness — через периодические `Stats` (top-level `AgentToControl.stats`) с `agent_id`, `uptime_seconds`, `window_end`, `users[]` (дельты per-юзер за окно). Дефолтный интервал у агента — 30с. CP апдейтит `agents.stats_deadline_at = now() + statsTTL` (default 90с) и пишет дельты append-only в `user_traffic`. Пропуск Stats → стрим закрывается с `DeadlineExceeded`.
 - **Renew — CP-only.** Агент про expires_at вообще не знает. Продление = только `subscriptions.end_at` обновляется + TG-уведомление. Снятие просроченной подписки делает `cleaner` (эмиттит `subscription_cancelled` → `StopUserSubscribe` → remove-таск).
 
@@ -110,8 +110,8 @@ cp .env.example .env                 # отредактировать ACME_EMAIL
 
 ### Контракт идемпотентности и порядка
 
-- `request_id` (= `subscription_id` для subscribe-флоу) = **единственный** ключ идемпотентности. Агент обязан echo'ить его в `Response`. Один и тот же `request_id` повторно отосланный CP при реконнекте — агент дедупит сам (PK на `tasks.request_id`).
-- На стороне CP: `agent_tasks(agent_id, request_id, kind)` — UNIQUE; повторный `EnqueueTask` с теми же ключами = no-op. Это значит, что для `(subscription_id, OpUpsert)` и `(subscription_id, OpRemove)` могут одновременно лежать две строки — это норма (выдали → отозвали). Recovery дренит весь pending по `id ASC`.
+- `request_id` (= `"<subscription_id>:<kind>"`) = **единственный** ключ идемпотентности. Агент обязан echo'ить его в `Response`. Один и тот же `request_id` повторно отосланный CP при реконнекте — агент дедупит сам (PK на `tasks.request_id`). Суффикс с `kind` критичен: без него upsert и remove одной подписки схлопывались бы в один `request_id` и агент игнорировал бы remove.
+- На стороне CP: `agent_tasks(agent_id, request_id, kind)` — UNIQUE; повторный `EnqueueTask` с теми же ключами = no-op. Для `(subscription_id, OpUpsert)` и `(subscription_id, OpRemove)` лежат две строки с **разными** `request_id` (суффикс) — это норма (выдали → отозвали). Recovery дренит весь pending по `id ASC`.
 - Webhook инвойса идемпотентен через short-circuit `inv.Status == SuccessInvoiceStatus`. Лукап инвойса по callback'у — единый для всех провайдеров: `(payment_provider, provider_order_id)`. Это требует индекс `idx_invoices_provider_order` (UNIQUE partial). `provider_order_id` = идентификатор транзакции на стороне провайдера (`uuid` у CryptoCloud, `transactionId` у Platega). `CreateOrderOutput.ProviderOrderID` ставится при создании ордера и сохраняется в `invoices.provider_order_id`.
 - **Доставка кредов отвязана от работы агента**: CP-side ошибка при обработке ответа (DB-недоступна, TG упал и т.п.) **не** ведёт к Nack'у таски. Таска остаётся `done_at IS NULL` и подхватится `RecoverPending` при реконнекте. Доставка пользователю ретраится внутри outbox-воркера.
 
