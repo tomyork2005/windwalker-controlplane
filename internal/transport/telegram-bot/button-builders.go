@@ -55,14 +55,9 @@ func buildRegionBtns(plans []*model.Plan) map[string]any {
 	}
 	sort.Strings(regions)
 
-	var rows [][]map[string]any
-	row := make([]map[string]any, 0, 3)
-	for i, region := range regions {
-		row = append(row, iconCallbackBtn(regionLabel(region), string(actPickRegion), region, ""))
-		if len(row) == 3 || i == len(regions)-1 {
-			rows = append(rows, row)
-			row = make([]map[string]any, 0, 3)
-		}
+	rows := make([][]map[string]any, 0, len(regions)+1)
+	for _, region := range regions {
+		rows = append(rows, []map[string]any{iconCallbackBtn(regionLabel(region), string(actPickRegion), region, "")})
 	}
 	rows = append(rows, []map[string]any{iconCallbackBtn("В меню", string(actBackToMain), "", iconHome)})
 	return iconKeyboard(rows...)
