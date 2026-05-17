@@ -87,7 +87,7 @@ func (s *AgentReceiver) HandleStartUserSubscribeResponse(ctx context.Context, su
 	}
 
 	link := creds.GetLink()
-	message := fmt.Sprintf("🕊️ Подключение готово!\n\n<code>%s</code>\n\nИнструкция — в «Моя подписка».", html.EscapeString(link))
+	message := fmt.Sprintf("🕊️ Подключение готово!\n\n<pre>%s</pre>\n\nИнструкция — в «Моя подписка».", html.EscapeString(link))
 
 	return s.store.WithTx(ctx, func(ctx context.Context) error {
 		if err := s.store.StoreSubscriptionCreds(ctx, subscribeID, link); err != nil {
